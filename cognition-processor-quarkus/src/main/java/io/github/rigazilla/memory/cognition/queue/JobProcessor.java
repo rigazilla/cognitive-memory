@@ -2,9 +2,9 @@ package io.github.rigazilla.memory.cognition.queue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.protobuf.ByteString;
-import io.github.chirino.memory.grpc.v1.Conversation;
-import io.github.chirino.memory.grpc.v1.ConversationsServiceGrpc;
-import io.github.chirino.memory.grpc.v1.GetConversationRequest;
+import io.github.chirino.memory.grpc.v1.AdminEntriesServiceGrpc;
+import io.github.chirino.memory.grpc.v1.AdminListEntriesRequest;
+import io.github.chirino.memory.grpc.v1.ListEntriesResponse;
 import io.github.rigazilla.memory.cognition.event.ScopeJob;
 import io.github.rigazilla.memory.cognition.evidence.EvidencePack;
 import io.github.rigazilla.memory.cognition.evidence.TranscriptLoader;
@@ -16,7 +16,6 @@ import io.github.rigazilla.memory.cognition.verification.DurableMemoryVerifier;
 import io.github.rigazilla.memory.cognition.verification.DurableVerificationResponse;
 import io.github.rigazilla.memory.cognition.writer.MemoryWriter;
 import io.grpc.CallOptions;
-import io.grpc.Channel;
 import io.grpc.ClientCall;
 import io.grpc.ClientInterceptor;
 import io.grpc.ForwardingClientCall;
@@ -92,7 +91,7 @@ public class JobProcessor {
     MemoryWriter memoryWriter;
 
     private ManagedChannel channel;
-    private ConversationsServiceGrpc.ConversationsServiceBlockingStub conversationsStub;
+    private AdminEntriesServiceGrpc.AdminEntriesServiceBlockingStub adminEntriesStub;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -107,7 +106,7 @@ public class JobProcessor {
             .intercept(new AuthInterceptor(apiKey))
             .build();
 
-        conversationsStub = ConversationsServiceGrpc.newBlockingStub(channel);
+        adminEntriesStub = AdminEntriesServiceGrpc.newBlockingStub(channel);
 
         LOG.info("JobProcessor gRPC clients initialized successfully");
     }
@@ -126,7 +125,7 @@ public class JobProcessor {
         public <ReqT, RespT> ClientCall<ReqT, RespT> interceptCall(
                 MethodDescriptor<ReqT, RespT> method,
                 CallOptions callOptions,
-                Channel next) {
+                io.grpc.Channel next) {
             return new ForwardingClientCall.SimpleForwardingClientCall<ReqT, RespT>(
                     next.newCall(method, callOptions)) {
                 @Override
@@ -358,18 +357,34 @@ public class JobProcessor {
      * @return Owner user ID
      * @throws JobProcessingException if conversation metadata cannot be loaded
      */
+    /**
+     * Get conversation owner by fetching the first entry using AdminEntriesService.
+     * The first entry's user_id is the conversation owner.
+     * Uses admin API to bypass membership requirements.
+     */
     private String getConversationOwner(String conversationId) {
         try {
             ByteString conversationIdBytes = uuidToBytes(conversationId);
 
-            GetConversationRequest request = GetConversationRequest.newBuilder()
+            // Use AdminListEntriesRequest to bypass membership checks
+            AdminListEntriesRequest request = AdminListEntriesRequest.newBuilder()
                 .setConversationId(conversationIdBytes)
+                .setChannel(io.github.chirino.memory.grpc.v1.Channel.HISTORY)
+                .setPage(io.github.chirino.memory.grpc.v1.PageRequest.newBuilder()
+                    .setPageSize(1)  // Only need first entry
+                    .build())
                 .build();
 
-            Conversation conversation = conversationsStub.getConversation(request);
+            ListEntriesResponse response = adminEntriesStub.listEntries(request);
 
-            String ownerId = conversation.getOwnerUserId();
-            LOG.debugf("Loaded conversation %s owner: %s", conversationId, ownerId);
+            if (response.getEntriesCount() == 0) {
+                String message = "No entries found for conversation " + conversationId;
+                LOG.error(message);
+                throw new JobProcessingException(message, new IllegalStateException(message));
+            }
+
+            String ownerId = response.getEntries(0).getUserId();
+            LOG.debugf("Loaded conversation %s owner from first entry: %s", conversationId, ownerId);
 
             return ownerId;
 
