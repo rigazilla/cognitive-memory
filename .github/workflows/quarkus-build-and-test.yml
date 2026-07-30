@@ -38,7 +38,7 @@ jobs:
 
       - name: Annotate Checkstyle violations
         if: matrix.os == 'ubuntu-latest' && (success() || failure())
-        uses: jwgmeligmeyling/checkstyle-github-action@65d6b3ba0def34313d68fc5c5dac4dc36c9a4b0d # v1.2
+        uses: jwgmeligmeyling/checkstyle-github-action@50292990e18466f2c5d95d04ff5fab931254fa5f # v1.2
         with:
           path: cognition-processor-quarkus/target/checkstyle-result.xml
 
