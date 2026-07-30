@@ -36,8 +36,20 @@ jobs:
         run: ./mvnw -B verify -DskipTests
         working-directory: cognition-processor-quarkus
 
+      - name: Annotate Checkstyle violations
+        if: matrix.os == 'ubuntu-latest' && (success() || failure())
+        uses: jwgmeligmeyling/checkstyle-github-action@65d6b3ba0def34313d68fc5c5dac4dc36c9a4b0d # v1.2
+        with:
+          path: cognition-processor-quarkus/target/checkstyle-result.xml
+
+      - name: Annotate SpotBugs findings
+        if: matrix.os == 'ubuntu-latest' && (success() || failure())
+        uses: jwgmeligmeyling/spotbugs-github-action@b8e2c3523acb34c87f14e18cbcd2d87db8c8584e # v1.2
+        with:
+          path: cognition-processor-quarkus/target/spotbugsXml.xml
+
       - name: Upload static analysis reports
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && (success() || failure())
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: static-analysis-reports
