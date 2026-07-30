@@ -30,3 +30,18 @@ jobs:
       - name: Run tests
         run: ./mvnw -B test
         working-directory: cognition-processor-quarkus
+
+      - name: Run static analysis (Checkstyle + SpotBugs)
+        if: matrix.os == 'ubuntu-latest'
+        run: ./mvnw -B verify -DskipTests
+        working-directory: cognition-processor-quarkus
+
+      - name: Upload static analysis reports
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: static-analysis-reports
+          path: |
+            cognition-processor-quarkus/target/checkstyle-result.xml
+            cognition-processor-quarkus/target/spotbugsXml.xml
+          if-no-files-found: ignore

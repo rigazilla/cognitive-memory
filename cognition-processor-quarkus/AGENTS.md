@@ -68,6 +68,24 @@ Do not require runtime `details` for every process. If a process has no meaningf
 
 Never read, print, summarize, parse, or transmit the `.env` file. It may contain secrets, API keys, tokens, or other credentials that must not be sent over the network by an AI assistant. If environment variable names are needed, inspect checked-in examples, documentation, application configuration, or ask the user to provide non-secret placeholders instead.
 
+## Code quality
+
+All Java code is checked by static analysis on every PR and push to `main`. When writing new code:
+
+- **Line length**: keep lines ≤ 100 characters (Google Java Style)
+- **No star imports**: use explicit imports only
+- **No unused imports**: remove any that are no longer referenced
+- **Naming**: follow Google Java Style conventions for types, methods, variables, and constants
+- **Braces**: always use braces for blocks (`if`, `for`, `while`, etc.)
+
+The full ruleset is in [`checkstyle.xml`](checkstyle.xml). Violations are currently reported as
+warnings (warn-only mode) but will become build failures once the existing baseline is cleaned up.
+
+Run checks locally before submitting a PR:
+```bash
+./mvnw verify -DskipTests
+```
+
 ## Progress tracking
 
 When a new feature is implemented and complete a design description document must be created in the DONE folder. Files there must be prefixed with "NNN-" where NNN is an increasing number.
