@@ -22,6 +22,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -280,18 +281,11 @@ public class TemporalMetadataEnrichmentService {
     }
 
     /**
-     * Converts a byte array to a short hex prefix for log messages.
-     *
-     * <p>Note: {@link io.github.rigazilla.memory.cognition.writer.MemoryWriter} converts bytes
-     * to a full UUID string via {@code bytesToUuid}; this method only produces a 4-byte hex
-     * prefix suitable for log correlation.
+     * Returns a short hex prefix of {@code bytes} for log correlation messages.
+     * Uses {@link java.util.HexFormat} (Java 17+) — no manual formatting needed.
      */
     private static String bytesToHex(byte[] bytes) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < Math.min(bytes.length, 4); i++) {
-            sb.append(String.format("%02x", bytes[i]));
-        }
-        return sb.append("...").toString();
+        return HexFormat.of().formatHex(bytes, 0, Math.min(bytes.length, 4)) + "...";
     }
 
 }
