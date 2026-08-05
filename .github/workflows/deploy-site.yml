@@ -48,7 +48,7 @@ jobs:
         working-directory: site
         env:
           ASTRO_BASE: /cognitive-memory/
-          ASTRO_SITE: https://chirino.github.io
+          ASTRO_SITE: https://rigazilla.github.io
         run: npm run build
 
       - name: Upload artifact

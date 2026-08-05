@@ -5,7 +5,7 @@ import { remarkBasePath } from './remark-base-path.mjs';
 import { remarkMermaid } from './remark-mermaid.mjs';
 
 const base = process.env.ASTRO_BASE || '/';
-const site = process.env.ASTRO_SITE || 'https://chirino.github.io';
+const site = process.env.ASTRO_SITE || 'https://rigazilla.github.io';
 
 export default defineConfig({
   site,
