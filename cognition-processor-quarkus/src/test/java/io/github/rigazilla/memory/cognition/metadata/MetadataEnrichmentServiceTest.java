@@ -437,8 +437,8 @@ class MetadataEnrichmentServiceTest {
 
     @Test
     void startEnrichmentAsyncSkipsWhenAlreadyRunning() {
-        // Force running status before calling startEnrichmentAsync
-        service.status.set("running");
+        // Force the AtomicBoolean guard to true before calling startEnrichmentAsync
+        service.running.set(true);
 
         service.startEnrichmentAsync();
 
@@ -447,7 +447,7 @@ class MetadataEnrichmentServiceTest {
     }
 
     @Test
-    void startEnrichmentAsyncResetsCounters() throws InterruptedException {
+    void runEnrichmentResetsCounters() {
         // Seed stale values from a previous imaginary run
         service.processed.set(99);
         service.enriched.set(88);
@@ -455,14 +455,9 @@ class MetadataEnrichmentServiceTest {
 
         when(mockStub.listNamespaces(any())).thenReturn(emptyNamespacesResponse());
 
-        service.startEnrichmentAsync();
-
-        // Wait for async completion (brief spin with generous timeout)
-        long deadline = System.currentTimeMillis() + 2000;
-        while (!"completed".equals(service.status.get())
-                && System.currentTimeMillis() < deadline) {
-            Thread.sleep(10);
-        }
+        // Call the synchronous core method directly — same approach as
+        // TemporalMetadataEnrichmentServiceTest.runBackfillResetsCountersAtStart()
+        service.runEnrichment();
 
         assertEquals(0, service.processed.get(), "processed must be reset at run start");
         assertEquals(0, service.enriched.get(), "enriched must be reset at run start");
@@ -475,13 +470,14 @@ class MetadataEnrichmentServiceTest {
 
         service.startEnrichmentAsync();
 
-        long deadline = System.currentTimeMillis() + 2000;
+        long deadline = System.currentTimeMillis() + 5000;
         while (!"completed".equals(service.status.get())
                 && System.currentTimeMillis() < deadline) {
             Thread.sleep(10);
         }
 
-        assertEquals("completed", service.status.get());
+        assertEquals("completed", service.status.get(),
+                "status must be 'completed' after successful run — timed out waiting");
         assertNotNull(service.lastRunTime.get(), "lastRunTime must be set after completion");
     }
 

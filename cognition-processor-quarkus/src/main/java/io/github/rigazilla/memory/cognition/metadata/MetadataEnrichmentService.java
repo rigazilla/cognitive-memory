@@ -31,6 +31,8 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -64,6 +66,7 @@ public class MetadataEnrichmentService {
 
     // Progress state — exposed to MetadataEnrichmentProcess for inspect()
     // Package-private for direct counter inspection in unit tests
+    final AtomicBoolean running = new AtomicBoolean(false);
     final AtomicReference<String> status = new AtomicReference<>("idle");
     final AtomicInteger processed = new AtomicInteger(0);
     final AtomicInteger enriched = new AtomicInteger(0);
@@ -114,18 +117,16 @@ public class MetadataEnrichmentService {
      * Silently skips if a run is already in progress.
      */
     public void startEnrichmentAsync() {
-        if ("running".equals(status.get())) {
+        if (!running.compareAndSet(false, true)) {
             LOG.info("Enrichment already running — skipping duplicate start");
             return;
         }
         status.set("running");
-        processed.set(0);
-        enriched.set(0);
-        errors.set(0);
 
-        CompletableFuture.runAsync(this::runEnrichment)
+        CompletableFuture.runAsync(this::runEnrichment, Executors.newVirtualThreadPerTaskExecutor())
                 .whenComplete((v, ex) -> {
                     lastRunTime.set(Instant.now());
+                    running.set(false);
                     if (ex != null) {
                         LOG.errorf(ex, "Enrichment run failed");
                         status.set("error: " + ex.getMessage());
@@ -137,9 +138,13 @@ public class MetadataEnrichmentService {
 
     // Package-private for direct invocation in unit tests
     void runEnrichment() {
+        processed.set(0);
+        enriched.set(0);
+        errors.set(0);
+
         // Activate CDI request context once for the entire pass — required for
         // @RequestScoped LangChain4j AI services running on the CompletableFuture
-        // common fork-join pool thread. Same pattern as JobProcessor.processJob().
+        // virtual thread. Same pattern as JobProcessor.processJob().
         // Guard against null container (e.g. in plain unit tests without CDI runtime).
         var arcContainer = Arc.container();
         ManagedContext requestContext = arcContainer != null ? arcContainer.requestContext() : null;
