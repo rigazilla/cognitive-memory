@@ -8,6 +8,7 @@ import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -88,7 +89,7 @@ public class ConsolidationService {
         Map<String, BatchEntry> seen = new LinkedHashMap<>();
 
         for (MemoryCandidate candidate : candidates) {
-            String key = candidate.content().strip().toLowerCase();
+            String key = candidate.content().strip().toLowerCase(Locale.ROOT);
             seen.computeIfAbsent(key, k -> new BatchEntry(candidate))
                 .mergeIn(candidate);
         }
