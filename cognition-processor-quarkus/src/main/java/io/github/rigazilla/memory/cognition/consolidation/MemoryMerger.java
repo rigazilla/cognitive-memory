@@ -107,7 +107,9 @@ public class MemoryMerger {
      * the union on re-merge.
      */
     static String stripEntryRefPrefix(String citation) {
-        if (citation == null) return null;
+        if (citation == null) {
+            return null;
+        }
         return ENTRY_REF_PREFIX.matcher(citation).replaceFirst("");
     }
 }
