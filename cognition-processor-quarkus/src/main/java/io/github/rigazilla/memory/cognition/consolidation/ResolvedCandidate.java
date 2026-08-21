@@ -49,9 +49,13 @@ public record ResolvedCandidate(
         return existingKey.isPresent();
     }
 
-    @Override
-    public String toString() {
-        return String.format("ResolvedCandidate{type=%s, update=%s, key=%s}",
-                candidate.type(), isUpdate(), existingKey.orElse("(new)"));
-    }
+
+   @Override
+   public String toString() {
+      return "ResolvedCandidate{" +
+             "type=" + candidate.type() +
+             ", update=" + isUpdate() +
+             ", key=" +  existingKey.orElse("(new)") +
+             '}';
+   }
 }

@@ -153,12 +153,15 @@ public class DirtyWindow {
     public int getEventCount() {
         return eventCount;
     }
-    
-    @Override
-    public String toString() {
-        return String.format("DirtyWindow[conv=%s, events=%d, entries=%d, age=%s, dueIn=%s]",
-                conversationId, eventCount, entryIds.size(),
-                Duration.between(firstObservedAt, Instant.now()),
-                Duration.between(Instant.now(), dueAt));
-    }
+
+   @Override
+   public String toString() {
+      return "DirtyWindow{" +
+             "conv=" + conversationId +
+             ", events=" + eventCount +
+             ", entries=" + entryIds.size() +
+             ", age=" + Duration.between(firstObservedAt, Instant.now()) +
+             ", dueIn=" + Duration.between(Instant.now(), dueAt) +
+             '}';
+   }
 }

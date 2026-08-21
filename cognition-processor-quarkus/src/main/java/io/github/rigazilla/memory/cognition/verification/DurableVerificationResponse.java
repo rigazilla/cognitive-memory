@@ -25,19 +25,24 @@ public record DurableVerificationResponse(
         MemoryCandidate candidate,
         String reason
     ) {
-        @Override
-        public String toString() {
-            return String.format("RejectedCandidate{type=%s, reason='%s', content='%s'}",
-                candidate.type(), reason,
-                candidate.content().length() > 30 ? 
-                    candidate.content().substring(0, 27) + "..." : 
-                    candidate.content());
-        }
+       @Override
+       public String toString() {
+          String content = candidate.content().length() > 30 ?
+                candidate.content().substring(0, 27) + "..." :
+                candidate.content();
+          return "RejectedCandidate{" +
+                 "type=" + candidate.type() +
+                 ", reason='" + reason + '\'' +
+                 ", content='" + content + '\'' +
+                 '}';
+       }
     }
-    
-    @Override
-    public String toString() {
-        return String.format("DurableVerificationResponse{verified=%d, rejected=%d}",
-            verified.size(), rejected.size());
-    }
+
+   @Override
+   public String toString() {
+      return "DurableVerificationResponse{" +
+             "verified=" + verified.size()+
+             ", rejected=" + rejected.size() +
+             '}';
+   }
 }

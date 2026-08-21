@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
+import java.util.Locale;
 
 /**
  * A candidate memory extracted from conversation evidence.
@@ -67,11 +68,15 @@ public record MemoryCandidate(
             && !citations.isEmpty();
     }
     
-    @Override
-    public String toString() {
-        return String.format("MemoryCandidate{type=%s, confidence=%.2f, citations=%d, content='%s', valid=%s}",
-            type, confidence, citations.size(), 
-            content.length() > 50 ? content.substring(0, 47) + "..." : content,
-            isValid());
-    }
+   @Override
+   public String toString() {
+      String formattedContent = content.length() > 50 ? content.substring(0, 47) + "..." : content;
+      return "MemoryCandidate{" +
+             "type=" + type +
+             ", confidence=" + String.format(Locale.ROOT, "%.2f", confidence) +
+             ", citations=" + citations.size() +
+             ", content='" + formattedContent + '\'' +
+             ", valid=" + isValid() +
+             '}';
+   }
 }
