@@ -1,6 +1,7 @@
 package io.github.rigazilla.memory.cognition.extraction;
 
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Response from the durable memory extractor.
@@ -65,7 +66,7 @@ public record DurableExtractionResponse(
             return "empty or blank content";
         }
         if (candidate.confidence() <= 0.0) {
-            return String.format("zero/negative confidence (%.2f)", candidate.confidence());
+            return String.format(Locale.ROOT, "zero/negative confidence (%.2f)", candidate.confidence());
         }
         if (candidate.citations() == null || candidate.citations().isEmpty()) {
             return "no citations";
@@ -92,14 +93,16 @@ public record DurableExtractionResponse(
         return facts.size() + preferences.size() + procedures.size() + 
                problemSolutions.size() + decisions.size();
     }
-    
-    @Override
-    public String toString() {
-        return String.format(
-            "DurableExtractionResponse{facts=%d, preferences=%d, procedures=%d,"
-                    + " problemSolutions=%d, decisions=%d, total=%d}",
-            facts.size(), preferences.size(), procedures.size(), 
-            problemSolutions.size(), decisions.size(), getTotalCount()
-        );
-    }
+
+   @Override
+   public String toString() {
+      return "DurableExtractionResponse{" +
+             "facts=" + facts.size() +
+             ", preferences=" + preferences.size() +
+             ", procedures=" + procedures.size() +
+             ", problemSolutions=" + problemSolutions.size() +
+             ", decisions=" + decisions.size() +
+             ", total=" + getTotalCount() +
+             '}';
+   }
 }

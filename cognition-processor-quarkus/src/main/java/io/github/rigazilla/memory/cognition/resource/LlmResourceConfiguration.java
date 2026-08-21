@@ -19,7 +19,7 @@ public interface LlmResourceConfiguration extends ResourceConfiguration {
      * 
      * @return The provider name
      */
-    String getProvider();
+    String provider();
     
     /**
      * Get the model identifier.
@@ -27,7 +27,7 @@ public interface LlmResourceConfiguration extends ResourceConfiguration {
      * 
      * @return The model ID
      */
-    String getModel();
+    String model();
     
     /**
      * Get the temperature parameter for generation.
@@ -35,14 +35,14 @@ public interface LlmResourceConfiguration extends ResourceConfiguration {
      * 
      * @return The temperature value (typically 0.0-1.0)
      */
-    Double getTemperature();
+    Double temperature();
     
     /**
      * Get the maximum number of tokens to generate.
      * 
      * @return The max tokens limit
      */
-    Integer getMaxTokens();
+    Integer maxTokens();
     
     /**
      * Get the API key for this LLM provider (if required).
@@ -50,7 +50,7 @@ public interface LlmResourceConfiguration extends ResourceConfiguration {
      * 
      * @return The API key, or empty if not required/configured
      */
-    Optional<String> getApiKey();
+    Optional<String> apiKey();
     
     /**
      * Get the base URL for the LLM provider (if applicable).

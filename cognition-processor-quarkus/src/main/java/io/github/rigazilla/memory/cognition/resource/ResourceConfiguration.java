@@ -22,7 +22,7 @@ public interface ResourceConfiguration {
      * 
      * @return The timeout duration
      */
-    Duration getTimeout();
+    Duration timeout();
     
     /**
      * Get custom properties for this resource.
@@ -30,7 +30,7 @@ public interface ResourceConfiguration {
      * 
      * @return Map of custom property names to values
      */
-    Map<String, String> getCustomProperties();
+    Map<String, String> customProperties();
     
     /**
      * Get a custom property value.
@@ -39,6 +39,6 @@ public interface ResourceConfiguration {
      * @return The property value, or empty if not set
      */
     default Optional<String> getCustomProperty(String key) {
-        return Optional.ofNullable(getCustomProperties().get(key));
+        return Optional.ofNullable(customProperties().get(key));
     }
 }

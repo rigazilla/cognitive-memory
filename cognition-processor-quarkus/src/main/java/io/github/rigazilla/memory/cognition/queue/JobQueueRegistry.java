@@ -100,10 +100,13 @@ public class JobQueueRegistry {
         int activeQueues,
         int pendingJobs
     ) {
-        @Override
-        public String toString() {
-            return String.format("RegistryStats{totalQueues=%d, activeQueues=%d, pendingJobs=%d}",
-                totalQueues, activeQueues, pendingJobs);
-        }
+       @Override
+       public String toString() {
+          return "RegistryStats{" +
+                 "totalQueues=" + totalQueues +
+                 ", activeQueues=" + activeQueues +
+                 ", pendingJobs=" + pendingJobs +
+                 '}';
+       }
     }
 }

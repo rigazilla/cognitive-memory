@@ -123,37 +123,37 @@ public class MetadataEnrichmentProcess implements CognitiveProcess {
 
     private static class DefaultExtractorLlmConfig implements LlmResourceConfiguration {
         @Override
-        public String getProvider() {
+        public String provider() {
             return "ollama";
         }
 
         @Override
-        public String getModel() {
+        public String model() {
             return "llama3.2";
         }
 
         @Override
-        public Double getTemperature() {
+        public Double temperature() {
             return 0.1;
         }
 
         @Override
-        public Integer getMaxTokens() {
+        public Integer maxTokens() {
             return 2048;
         }
 
         @Override
-        public Optional<String> getApiKey() {
+        public Optional<String> apiKey() {
             return Optional.empty();
         }
 
         @Override
-        public Duration getTimeout() {
+        public Duration timeout() {
             return Duration.ofSeconds(60);
         }
 
         @Override
-        public Map<String, String> getCustomProperties() {
+        public Map<String, String> customProperties() {
             return Map.of();
         }
     }

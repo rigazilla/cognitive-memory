@@ -68,18 +68,22 @@ public class DefaultApiResourceConfiguration implements ApiResourceConfiguration
     }
     
     @Override
-    public Duration getTimeout() {
+    public Duration timeout() {
         return timeout;
     }
     
     @Override
-    public Map<String, String> getCustomProperties() {
+    public Map<String, String> customProperties() {
         return customProperties;
     }
-    
-    @Override
-    public String toString() {
-        return String.format("ApiResourceConfiguration{endpoint='%s', retryAttempts=%d, timeout=%s}",
-            endpoint, retryAttempts, timeout);
-    }
+
+   @Override
+   public String toString() {
+      return "DefaultApiResourceConfiguration{" +
+             "endpoint='" + endpoint + '\'' +
+             ", retryAttempts=" + retryAttempts +
+             ", timeout=" + timeout +
+             ", retryDelay=" + retryDelay +
+             '}';
+   }
 }

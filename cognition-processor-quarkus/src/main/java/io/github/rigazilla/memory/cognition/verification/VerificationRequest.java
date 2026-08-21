@@ -29,10 +29,12 @@ public record VerificationRequest(
     public String getEvidenceText() {
         return evidence.formatAsText();
     }
-    
-    @Override
-    public String toString() {
-        return String.format("VerificationRequest{candidates=%d, evidence=%s}",
-            candidates.size(), evidence);
-    }
+
+   @Override
+   public String toString() {
+      return "VerificationRequest{" +
+             "candidates=" + candidates +
+             ", evidence=" + evidence +
+             '}';
+   }
 }

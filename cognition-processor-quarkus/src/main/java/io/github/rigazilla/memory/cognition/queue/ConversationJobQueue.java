@@ -98,10 +98,13 @@ public class ConversationJobQueue {
     public String getConversationId() {
         return conversationId;
     }
-    
-    @Override
-    public String toString() {
-        return String.format("ConversationJobQueue{conversationId=%s, size=%d, processing=%s}",
-            conversationId, queue.size(), processing.get());
-    }
+
+   @Override
+   public String toString() {
+      return "ConversationJobQueue{" +
+             "conversationId=" + conversationId +
+             ", size=" + size() +
+             ", processing=" + processing +
+             '}';
+   }
 }

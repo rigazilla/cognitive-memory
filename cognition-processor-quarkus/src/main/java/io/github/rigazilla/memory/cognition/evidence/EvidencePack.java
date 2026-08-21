@@ -207,9 +207,11 @@ public class EvidencePack {
     public int size() {
         return transcriptEntries.size();
     }
-    
-    @Override
-    public String toString() {
-        return String.format("EvidencePack{entries=%d}", transcriptEntries.size());
-    }
+
+   @Override
+   public String toString() {
+      return "EvidencePack{" +
+             "entries=" + size() +
+             '}';
+   }
 }
