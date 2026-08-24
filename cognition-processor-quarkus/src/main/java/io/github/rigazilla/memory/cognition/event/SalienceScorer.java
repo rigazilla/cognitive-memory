@@ -383,7 +383,8 @@ public class SalienceScorer {
                 LOG.infof("SalienceScorer: loaded %d keywords from file: %s", result.size(), path);
                 return result;
             } catch (Exception e) {
-                LOG.warnf("SalienceScorer: could not read salience.keywords.file '%s' (%s) — falling back to bundled defaults",
+                LOG.warnf("SalienceScorer: could not read salience.keywords.file '%s' (%s)"
+                        + " — falling back to bundled defaults",
                         path, e.getMessage());
                 return loadBundledKeywords(BUNDLED_KEYWORDS);
             }
@@ -408,13 +409,15 @@ public class SalienceScorer {
                 .getResourceAsStream(resourcePath)) {
             if (is == null) {
                 throw new IllegalStateException(
-                        "Bundled resource '" + resourcePath + "' not found — broken build or missing quarkus.native.resources.includes");
+                        "Bundled resource '" + resourcePath + "' not found"
+                        + " — broken build or missing quarkus.native.resources.includes");
             }
             String content = new String(is.readAllBytes(), StandardCharsets.UTF_8);
             List<String> result = parseKeywordLines(content.lines().toList());
             if (result.isEmpty()) {
                 throw new IllegalStateException(
-                        "Bundled resource '" + resourcePath + "' parsed to zero keywords — file may contain only comments or be empty");
+                        "Bundled resource '" + resourcePath + "' parsed to zero keywords"
+                        + " — file may contain only comments or be empty");
             }
             LOG.debugf("SalienceScorer: loaded %d keywords from bundled defaults", result.size());
             return result;
@@ -422,7 +425,8 @@ public class SalienceScorer {
             throw e;
         } catch (Exception e) {
             throw new IllegalStateException(
-                    "Failed to read bundled resource '" + resourcePath + "' — broken build or missing quarkus.native.resources.includes", e);
+                    "Failed to read bundled resource '" + resourcePath + "'"
+                    + " — broken build or missing quarkus.native.resources.includes", e);
         }
     }
 
