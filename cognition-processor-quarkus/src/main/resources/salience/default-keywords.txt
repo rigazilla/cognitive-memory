@@ -1,0 +1,23 @@
+# Salience keyword list — one keyword per line.
+# Lines starting with # are comments. Blank lines are ignored.
+# --- technical ---
+error
+bug
+deploy
+test
+code
+rollback
+prod
+# --- preference ---
+prefer
+like
+want
+need
+# --- decision ---
+decided
+chose
+selected
+# --- procedure ---
+steps
+process
+workflow

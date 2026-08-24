@@ -1,5 +1,7 @@
 package io.github.rigazilla.memory.cognition.event;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.chirino.memory.grpc.v1.EventNotification;
 import io.github.chirino.memory.grpc.v1.EventScope;
 import io.github.chirino.memory.grpc.v1.EventStreamServiceGrpc;
@@ -19,11 +21,16 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.Objects;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.StreamSupport;
+
+import static java.util.stream.Collectors.joining;
 
 /**
  * gRPC client for Memory Service admin event stream.
@@ -69,9 +76,15 @@ public class GrpcAdminEventClient {
 
     @Inject
     CheckpointService checkpointService;
-    
+
     @Inject
     DirtyWindowRegistry windowRegistry;
+
+    @Inject
+    SalienceScorer salienceScorer;
+
+    @Inject
+    ObjectMapper objectMapper;
 
     private ManagedChannel channel;
     final AtomicBoolean connected = new AtomicBoolean(false);
@@ -173,7 +186,8 @@ public class GrpcAdminEventClient {
                 .withCallCredentials(credentials);
         
         SubscribeEventsRequest.Builder requestBuilder = SubscribeEventsRequest.newBuilder()
-                .setScope(EventScope.EVENT_SCOPE_ADMIN);
+                .setScope(EventScope.EVENT_SCOPE_ADMIN)
+                .setDetail("full");
         
         if (afterCursor != null) {
             requestBuilder.setAfterCursor(afterCursor);
@@ -206,28 +220,19 @@ public class GrpcAdminEventClient {
             String cursor = event.hasCursor() ? event.getCursor() : null;
             
             // Parse JSON data from event
-            String jsonData = null;
+            final var rawData = event.getData();
+            final String jsonData = rawData.isEmpty() ? null : rawData.toStringUtf8();
             String conversationId = null;
             String entryId = null;
-            
-            if (!event.getData().isEmpty()) {
-                jsonData = event.getData().toStringUtf8();
-                
-                // Extract conversation ID
-                conversationId = extractJsonField(jsonData, "conversation_id");
-                if (conversationId == null) {
-                    conversationId = extractJsonField(jsonData, "conversation");
-                }
-                
+
+            if (jsonData != null) {
+                // Extract conversation ID — detail=full entry payloads use "conversationId" (model.Entry JSON tag);
+                // summary payloads and conversation-kind events use "conversation" (outbox schema, doc 090).
+                // "conversation_id" is retained as a defensive fallback; no documented source uses it.
+                conversationId = firstNonNull(jsonData, "conversationId", "conversation_id", "conversation");
+
                 // Extract entry ID (for entry events)
-                // Entry events use field name "entry"
-                entryId = extractJsonField(jsonData, "entry");
-                if (entryId == null) {
-                    entryId = extractJsonField(jsonData, "entry_id");
-                }
-                if (entryId == null) {
-                    entryId = extractJsonField(jsonData, "id");
-                }
+                entryId = firstNonNull(jsonData, "entry", "entry_id", "id");
             }
             
             // Update last cursor
@@ -267,7 +272,19 @@ public class GrpcAdminEventClient {
 
             // Accept event into dirty window registry (if it has a conversation ID)
             if (conversationId != null && cursor != null) {
-                windowRegistry.acceptEvent(conversationId, cursor, entryId, Instant.now());
+                // Salience gate: filter low-salience events before opening a debounce window
+                // Events with no extractable user text pass through conservatively
+                // A scorer failure must never drop an event — default to keep on any exception
+                boolean keep;
+                try {
+                    keep = salienceScorer.shouldKeep(extractEntryText(jsonData));
+                } catch (Exception e) {
+                    LOG.warnf(e, "salienceScorer.shouldKeep failed — passing event through conservatively");
+                    keep = true;
+                }
+                if (keep) {
+                    windowRegistry.acceptEvent(conversationId, cursor, entryId, Instant.now());
+                }
             }
             
             // Periodic checkpoint (every 10 events)
@@ -321,8 +338,43 @@ public class GrpcAdminEventClient {
     }
 
     /**
-     * Extract a field value from JSON string (simple string search, not a full JSON parser).
-     * Returns null if field not found.
+     * Extracts the text of all user turns from the entry payload's {@code content} array
+     * and returns them joined by a space. Returns {@code null} when no user text is found,
+     * which causes the salience gate to pass the event through conservatively.
+     *
+     * @param json raw JSON string from the event data field
+     * @return concatenated user-turn text, or {@code null} if absent or unreadable
+     */
+    String extractEntryText(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode contentArray = objectMapper.readTree(json).get("content");
+            if (contentArray == null || !contentArray.isArray() || contentArray.isEmpty()) {
+                return null;
+            }
+            String text = StreamSupport.stream(contentArray.spliterator(), false)
+                    .filter(turn -> {
+                        JsonNode role = turn.get("role");
+                        return role != null && "USER".equals(role.asText(""));
+                    })
+                    .map(turn -> {
+                        JsonNode textNode = turn.get("text");
+                        return textNode != null ? textNode.asText("").strip() : "";
+                    })
+                    .filter(t -> !t.isEmpty())
+                    .collect(joining(" "));
+            return text.isEmpty() ? null : text;
+        } catch (Exception e) {
+            LOG.debugf("extractEntryText: could not parse content array (%s)", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Extracts a scalar string field value from a JSON string.
+     * Returns {@code null} if the field is absent.
      */
     String extractJsonField(String json, String fieldName) {
         String searchPattern = "\"" + fieldName + "\":\"";
@@ -335,6 +387,18 @@ public class GrpcAdminEventClient {
             }
         }
         return null;
+    }
+
+    /**
+     * Returns the value of the first field name in {@code fieldNames} present in
+     * {@code json}, or {@code null} if none are found.
+     */
+    String firstNonNull(String json, String... fieldNames) {
+        return Arrays.stream(fieldNames)
+                .map(name -> extractJsonField(json, name))
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(null);
     }
 
     void saveCheckpoint() {
