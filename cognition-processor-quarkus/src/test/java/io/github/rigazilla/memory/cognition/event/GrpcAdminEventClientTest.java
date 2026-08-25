@@ -23,7 +23,6 @@ import org.mockito.ArgumentCaptor;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Nested;
@@ -68,19 +67,11 @@ class GrpcAdminEventClientTest {
 
         // Install the scorer in pass-through mode so the handleEvent tests below
         // exercise event routing without salience filtering.
-        SalienceScorer scorer = new SalienceScorer();
-        scorer.enabled = false;
-        scorer.threshold = 0.3;
-        scorer.minLength = 10;
-        scorer.greetingEnabled = true;
-        scorer.acknowledgmentEnabled = true;
-        scorer.farewellEnabled = true;
-        scorer.fillerEnabled = true;
-        scorer.thanksEnabled = true;
-        scorer.keywordsEnabled = false;
-        scorer.keywordsList = Optional.empty();
-        scorer.keywordsFile = Optional.empty();
-        scorer.metricsEnabled = false;
+        SalienceScorerConfigStub salienceConfig = new SalienceScorerConfigStub();
+        salienceConfig.enabled = false;
+        salienceConfig.metricsEnabled = false;
+        SalienceScorer scorer = new SalienceScorer(salienceConfig);
+        scorer.init();
         client.salienceScorer = scorer;
         client.objectMapper = new ObjectMapper();
 
@@ -397,19 +388,7 @@ class GrpcAdminEventClientTest {
 
         /** Installs a fully enabled scorer with bundled keywords loaded. */
         private void useEnabledScorer() {
-            SalienceScorer enabled = new SalienceScorer();
-            enabled.enabled = true;
-            enabled.threshold = 0.3;
-            enabled.minLength = 10;
-            enabled.greetingEnabled = true;
-            enabled.acknowledgmentEnabled = true;
-            enabled.farewellEnabled = true;
-            enabled.fillerEnabled = true;
-            enabled.thanksEnabled = true;
-            enabled.keywordsEnabled = true;
-            enabled.keywordsList = Optional.empty();
-            enabled.keywordsFile = Optional.empty();
-            enabled.metricsEnabled = true;
+            SalienceScorer enabled = new SalienceScorer(new SalienceScorerConfigStub());
             enabled.init();
             client.salienceScorer = enabled;
         }

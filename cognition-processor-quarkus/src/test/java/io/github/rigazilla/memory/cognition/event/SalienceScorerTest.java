@@ -23,22 +23,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class SalienceScorerTest {
 
     private SalienceScorer scorer;
+    private SalienceScorerConfigStub salienceConfig;
 
     @BeforeEach
     void setUp() {
-        scorer = new SalienceScorer();
-        scorer.enabled = true;
-        scorer.threshold = 0.3;
-        scorer.minLength = 10;
-        scorer.greetingEnabled = true;
-        scorer.acknowledgmentEnabled = true;
-        scorer.farewellEnabled = true;
-        scorer.thanksEnabled = true;
-        scorer.keywordsEnabled = true;
-        scorer.fillerEnabled = true;
-        scorer.keywordsList = Optional.empty();
-        scorer.keywordsFile = Optional.empty();
-        scorer.metricsEnabled = true;
+        salienceConfig = new SalienceScorerConfigStub();
+        scorer = new SalienceScorer(salienceConfig);
     }
 
     private void init(SalienceScorer s) {
@@ -226,7 +216,7 @@ class SalienceScorerTest {
         @Test
         void customThreshold_0_8_filtersKeywordScore() {
             // With threshold=0.8, score 0.8 (keyword) is NOT kept (0.8 > 0.8 is false)
-            scorer.threshold = 0.8;
+            salienceConfig.threshold = 0.8;
             init(scorer);
             assertThat(scorer.shouldKeep("bug here")).isFalse();
         }
@@ -236,7 +226,7 @@ class SalienceScorerTest {
             // shouldKeep uses strict > so score == threshold is filtered, not kept.
             // Set threshold to 0.4 (the floor keep score) and use a 10-char no-keyword
             // input that scores exactly 0.4; it must be filtered at this threshold.
-            scorer.threshold = 0.4;
+            salienceConfig.threshold = 0.4;
             double s = scorer.score("no pattern");
             assertThat(s).isEqualTo(0.4);
             assertThat(scorer.shouldKeep("no pattern")).isFalse();
@@ -339,7 +329,7 @@ class SalienceScorerTest {
 
         @Test
         void disabled_everythingPassesThrough() {
-            scorer.enabled = false;
+            salienceConfig.enabled = false;
             init(scorer);
             assertThat(scorer.shouldKeep("hi")).isTrue();
             assertThat(scorer.shouldKeep("ok")).isTrue();
@@ -348,7 +338,7 @@ class SalienceScorerTest {
 
         @Test
         void fillerDisabled_fillerNoLongerFilters() {
-            scorer.fillerEnabled = false;
+            salienceConfig.pattern.fillerEnabled = false;
             init(scorer);
             // "well that works" = 15 chars: no pattern active for it, no keyword, len > 10,
             // len ≤ 20 → score 0.4 → kept
@@ -357,7 +347,7 @@ class SalienceScorerTest {
 
         @Test
         void greetingDisabled_greetingNoLongerFilters() {
-            scorer.greetingEnabled = false;
+            salienceConfig.pattern.greetingEnabled = false;
             init(scorer);
             // "good morning" = 12 chars, no keyword, not ack/farewell/filler/thanks,
             // len ≥ 10, len ≤ 20 → score 0.4 → kept
@@ -366,7 +356,7 @@ class SalienceScorerTest {
 
         @Test
         void acknowledgmentDisabled_ackNoLongerFilters() {
-            scorer.acknowledgmentEnabled = false;
+            salienceConfig.pattern.acknowledgmentEnabled = false;
             init(scorer);
             // "understood" = 10 chars, not greeting/farewell/filler/thanks,
             // len ≥ 10, len ≤ 20 → score 0.4 → kept
@@ -375,7 +365,7 @@ class SalienceScorerTest {
 
         @Test
         void farewellDisabled_farewellNoLongerFilters() {
-            scorer.farewellEnabled = false;
+            salienceConfig.pattern.farewellEnabled = false;
             init(scorer);
             // "see you later" = 13 chars, not filtered by any other pattern,
             // len ≥ 10, len ≤ 20 → score 0.4 → kept
@@ -384,7 +374,7 @@ class SalienceScorerTest {
 
         @Test
         void thanksDisabled_thanksNoLongerFilters() {
-            scorer.thanksEnabled = false;
+            salienceConfig.pattern.thanksEnabled = false;
             init(scorer);
             // "thanks a lot" = 12 chars, not caught by any other pattern,
             // len ≥ 10, len ≤ 20 → score 0.4 → kept
@@ -392,16 +382,19 @@ class SalienceScorerTest {
         }
 
         @Test
-        void keywordsDisabled_keywordMessageScoresLower() {
-            scorer.keywordsEnabled = false;
+        void customKeywordList_excludingBug_keywordMessageScoresLower() {
+            // Replace bundled keywords with a list that does not contain "bug".
+            // "bug here" (8 chars) then hits the length rule (below minLength=10) → 0.1 → filtered.
+            // An empty list now falls back to bundled defaults (see KeywordLoading tests);
+            // to exclude a keyword it must simply be absent from the custom list.
+            salienceConfig.keywords.list = Optional.of(List.of("outage", "incident"));
             init(scorer);
-            // "bug here" = 8 chars, keyword disabled → falls to length check → 0.1 → filtered
             assertThat(scorer.shouldKeep("bug here")).isFalse();
         }
 
         @Test
         void metricsDisabled_countersDoNotIncrement() {
-            scorer.metricsEnabled = false;
+            salienceConfig.metricsEnabled = false;
             init(scorer);
             scorer.shouldKeep("hi");
             scorer.shouldKeep("deploy now");
@@ -414,7 +407,7 @@ class SalienceScorerTest {
 
         @Test
         void minLengthAdjusted_longerThresholdFiltersMoreMessages() {
-            scorer.minLength = 20;
+            salienceConfig.minLength = 20;
             init(scorer);
             // "no pattern" = 10 chars; with minLength=20 → short-message rule → 0.1 → filtered
             assertThat(scorer.score("no pattern")).isEqualTo(0.1);
@@ -444,7 +437,7 @@ class SalienceScorerTest {
         void externalKeywordsFile_usedInsteadOfBundled(@TempDir Path tempDir) throws IOException {
             Path kwFile = tempDir.resolve("custom-keywords.txt");
             Files.writeString(kwFile, "# custom\ncrash\noutage\n\n");
-            scorer.keywordsFile = Optional.of(kwFile.toString());
+            salienceConfig.keywords.file = Optional.of(kwFile.toString());
 
             List<String> keywords = scorer.loadKeywords();
             assertThat(keywords).containsExactlyInAnyOrder("crash", "outage");
@@ -454,7 +447,7 @@ class SalienceScorerTest {
         @Test
         void missingExternalKeywordsFile_warnsAndFallsBackToBundled(@TempDir Path tempDir) {
             Path missing = tempDir.resolve("does-not-exist.txt");
-            scorer.keywordsFile = Optional.of(missing.toString());
+            salienceConfig.keywords.file = Optional.of(missing.toString());
 
             Logger julLogger = Logger.getLogger(SalienceScorer.class.getName());
             WarnCapture warnCapture = new WarnCapture();
@@ -473,7 +466,7 @@ class SalienceScorerTest {
 
         @Test
         void inlineKeywordsList_overridesBundled() {
-            scorer.keywordsList = Optional.of("crash,outage,incident");
+            salienceConfig.keywords.list = Optional.of(List.of("crash", "outage", "incident"));
 
             List<String> keywords = scorer.loadKeywords();
             assertThat(keywords).containsExactlyInAnyOrder("crash", "outage", "incident");
@@ -484,8 +477,8 @@ class SalienceScorerTest {
         void inlineKeywordsList_overridesExternalFile(@TempDir Path tempDir) throws IOException {
             Path kwFile = tempDir.resolve("file-keywords.txt");
             Files.writeString(kwFile, "filekeyword\n");
-            scorer.keywordsFile = Optional.of(kwFile.toString());
-            scorer.keywordsList = Optional.of("inlinekeyword");
+            salienceConfig.keywords.file = Optional.of(kwFile.toString());
+            salienceConfig.keywords.list = Optional.of(List.of("inlinekeyword"));
 
             List<String> keywords = scorer.loadKeywords();
             assertThat(keywords).containsExactly("inlinekeyword");
@@ -496,6 +489,61 @@ class SalienceScorerTest {
             assertThatThrownBy(() -> scorer.loadBundledKeywords("salience/does-not-exist.txt"))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("not found");
+        }
+
+        @Test
+        void emptyExternalFile_warnsAndFallsBackToBundled(@TempDir Path tempDir) throws IOException {
+            Path kwFile = tempDir.resolve("empty.txt");
+            Files.writeString(kwFile, "");
+            salienceConfig.keywords.file = Optional.of(kwFile.toString());
+
+            Logger julLogger = Logger.getLogger(SalienceScorer.class.getName());
+            WarnCapture warnCapture = new WarnCapture();
+            julLogger.addHandler(warnCapture);
+            julLogger.setLevel(Level.ALL);
+            try {
+                List<String> keywords = scorer.loadKeywords();
+                assertThat(keywords).contains("error", "bug", "deploy");
+                assertThat(warnCapture.sawWarn).isTrue();
+            } finally {
+                julLogger.removeHandler(warnCapture);
+            }
+        }
+
+        @Test
+        void commentsOnlyExternalFile_warnsAndFallsBackToBundled(@TempDir Path tempDir) throws IOException {
+            Path kwFile = tempDir.resolve("comments-only.txt");
+            Files.writeString(kwFile, "# this is a comment\n\n# another comment\n   \n");
+            salienceConfig.keywords.file = Optional.of(kwFile.toString());
+
+            Logger julLogger = Logger.getLogger(SalienceScorer.class.getName());
+            WarnCapture warnCapture = new WarnCapture();
+            julLogger.addHandler(warnCapture);
+            julLogger.setLevel(Level.ALL);
+            try {
+                List<String> keywords = scorer.loadKeywords();
+                assertThat(keywords).contains("error", "bug", "deploy");
+                assertThat(warnCapture.sawWarn).isTrue();
+            } finally {
+                julLogger.removeHandler(warnCapture);
+            }
+        }
+
+        @Test
+        void emptyInlineList_warnsAndFallsBackToBundled() {
+            salienceConfig.keywords.list = Optional.of(List.of());
+
+            Logger julLogger = Logger.getLogger(SalienceScorer.class.getName());
+            WarnCapture warnCapture = new WarnCapture();
+            julLogger.addHandler(warnCapture);
+            julLogger.setLevel(Level.ALL);
+            try {
+                List<String> keywords = scorer.loadKeywords();
+                assertThat(keywords).contains("error", "bug", "deploy");
+                assertThat(warnCapture.sawWarn).isTrue();
+            } finally {
+                julLogger.removeHandler(warnCapture);
+            }
         }
 
     }

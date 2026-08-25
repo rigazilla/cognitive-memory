@@ -6,6 +6,7 @@ import io.github.chirino.memory.grpc.v1.AdminListEntriesRequest;
 import io.github.chirino.memory.grpc.v1.Channel;
 import io.github.chirino.memory.grpc.v1.Entry;
 import io.github.chirino.memory.grpc.v1.ListEntriesResponse;
+import io.github.chirino.memory.grpc.v1.PageRequest;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.grpc.ManagedChannel;
 import jakarta.annotation.PostConstruct;
@@ -81,11 +82,17 @@ public class TranscriptLoader {
                 .setConversationId(conversationId)
                 .setChannel(Channel.HISTORY);
 
-            String pageToken = previousEntryId != null ? previousEntryId : "";
-            requestBuilder.setPage(io.github.chirino.memory.grpc.v1.PageRequest.newBuilder()
-                .setPageToken(pageToken)
-                .setPageSize(1000)
-            );
+            if (previousEntryId != null) {
+                requestBuilder.setPage(PageRequest.newBuilder()
+                    .setPageToken(previousEntryId)
+                    .setPageSize(1000)
+                );
+            } else {
+                requestBuilder.setPage(PageRequest.newBuilder()
+                    .setPageToken("")
+                    .setPageSize(1000)
+                );
+            }
 
             if (!entryIds.isEmpty()) {
                 String lastEntryId = entryIds.get(entryIds.size() - 1);

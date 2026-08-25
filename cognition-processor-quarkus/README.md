@@ -57,6 +57,61 @@ Environment variable examples:
 - `env.example` for local host-based runs
 - `env.example` for both local and Docker-based runs
 
+### Salience filtering
+
+Low-salience events (greetings, filler words, etc.) are scored and dropped before the extraction
+pipeline at two points: when the event arrives (`handleEvent`) and again at extraction time
+(`filterEvidenceForBatch`) to catch context entries the first gate never saw.
+
+All keys live under the `salience.*` prefix.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `salience.enabled` | `true` | Enable/disable the filter entirely. |
+| `salience.threshold` | `0.3` | Events scoring at or below this value are dropped. |
+| `salience.min-length` | `10` | Events shorter than this (chars) score 0.1 and are dropped. |
+| `salience.metrics.enabled` | `true` | Expose `eventsFiltered` / `eventsKept` counters. |
+| `salience.pattern.greeting-enabled` | `true` | Drop events that match the greeting pattern. |
+| `salience.pattern.acknowledgment-enabled` | `true` | Drop events that match the acknowledgment pattern. |
+| `salience.pattern.farewell-enabled` | `true` | Drop events that match the farewell pattern. |
+| `salience.pattern.filler-enabled` | `true` | Drop events that match the filler pattern. |
+| `salience.pattern.thanks-enabled` | `true` | Drop events that match the thanks pattern. |
+| `salience.pattern.greetings` | `hi,hello,hey,…` | Comma-separated greeting terms. Override to localise. |
+| `salience.pattern.acknowledgments` | `ok,understood,…` | Comma-separated acknowledgment terms. |
+| `salience.pattern.farewells` | `bye,goodbye,…` | Comma-separated farewell terms. |
+| `salience.pattern.fillers` | `um,hmm,…` | Comma-separated filler terms. |
+| `salience.pattern.thanks` | `thanks,thank you,…` | Comma-separated thanks terms. |
+| `salience.keywords.list` | _(absent)_ | Inline comma-separated keywords. Highest priority — overrides file and bundled defaults. |
+| `salience.keywords.file` | _(absent)_ | Path to an external keyword file (one per line, `#` comments ignored). Overrides bundled defaults. |
+
+#### Keyword source priority and fallback
+
+Keywords are loaded from the first source that is configured, in priority order:
+
+1. `salience.keywords.list` — inline list in config (highest priority)
+2. `salience.keywords.file` — path to an external file
+3. Bundled classpath resource `salience/default-keywords.txt` (ships with the jar)
+
+If an external source (`list` or `file`) is configured but parses to zero keywords (empty, or
+contains only blank lines and `#` comments), a WARN is logged and the service falls back to the
+bundled defaults. This preserves recall while signalling the misconfiguration. A missing or empty
+bundled resource aborts startup.
+
+The bundled file ships 17 keywords across four categories (technical, preference, decision,
+procedure). To inspect or replace them: `src/main/resources/salience/default-keywords.txt`.
+
+To localise pattern terms (e.g. Spanish), supply overrides in `application.properties` or via
+a separate file pointed to by `smallrye.config.locations`:
+
+```properties
+# application.properties — Spanish override example
+salience.pattern.greetings=hola,buenos días,buenas tardes
+salience.pattern.acknowledgments=vale,entendido
+salience.pattern.farewells=adiós,hasta luego
+salience.pattern.fillers=pues,bueno
+salience.pattern.thanks=gracias,muchas gracias
+```
+
 ## Docker Dev/Test
 
 A JVM-based Docker setup is included for local integration testing.
