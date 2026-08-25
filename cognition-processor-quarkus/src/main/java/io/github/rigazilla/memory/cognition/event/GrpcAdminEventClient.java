@@ -43,6 +43,7 @@ import static java.util.stream.Collectors.joining;
 public class GrpcAdminEventClient {
 
     private static final Logger LOG = Logger.getLogger(GrpcAdminEventClient.class);
+    private static final String EVENT_DETAIL_FULL = "full";
     private static final Metadata.Key<String> API_KEY_HEADER =
             Metadata.Key.of("x-api-key", Metadata.ASCII_STRING_MARSHALLER);
     private static final Metadata.Key<String> AUTHORIZATION_HEADER =
@@ -187,7 +188,7 @@ public class GrpcAdminEventClient {
         
         SubscribeEventsRequest.Builder requestBuilder = SubscribeEventsRequest.newBuilder()
                 .setScope(EventScope.EVENT_SCOPE_ADMIN)
-                .setDetail("full");
+                .setDetail(EVENT_DETAIL_FULL);
         
         if (afterCursor != null) {
             requestBuilder.setAfterCursor(afterCursor);

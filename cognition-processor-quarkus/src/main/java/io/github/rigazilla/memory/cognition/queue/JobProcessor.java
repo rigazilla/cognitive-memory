@@ -1,9 +1,13 @@
 package io.github.rigazilla.memory.cognition.queue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.protobuf.ByteString;
+import com.google.protobuf.Value;
 import io.github.chirino.memory.grpc.v1.AdminConversation;
 import io.github.chirino.memory.grpc.v1.AdminConversationsServiceGrpc;
 import io.github.chirino.memory.grpc.v1.AdminGetConversationRequest;
+import io.github.chirino.memory.grpc.v1.Entry;
+import io.github.rigazilla.memory.cognition.event.SalienceScorer;
 import io.github.rigazilla.memory.cognition.event.ScopeJob;
 import io.github.rigazilla.memory.cognition.evidence.EvidencePack;
 import io.github.rigazilla.memory.cognition.evidence.TranscriptLoader;
@@ -30,10 +34,12 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
@@ -98,6 +104,9 @@ public class JobProcessor {
 
     @Inject
     ConsolidationService consolidationService;
+
+    @Inject
+    SalienceScorer salienceScorer;
 
     ManagedChannel channel;
     AdminConversationsServiceGrpc.AdminConversationsServiceBlockingStub conversationsStub;
@@ -237,6 +246,10 @@ public class JobProcessor {
                 userId  // Pass conversation owner for on-behalf-of authorization
             );
             LOG.infof("  ✓ Loaded %d transcript entries", evidence.size());
+
+            if (!job.entryIds().isEmpty()) {
+                evidence = filterEvidenceForBatch(job.entryIds(), evidence);
+            }
 
             // Build provenance from ScopeJob for this batch
             Provenance provenance = Provenance.fromScopeJobMinimal(job, runtimeId, runtimeVersion);
@@ -472,6 +485,51 @@ public class JobProcessor {
         }
 
         return new ArrayList<>(entryIds);
+    }
+
+    EvidencePack filterEvidenceForBatch(List<String> batchEntryIds, EvidencePack evidence) {
+        List<Entry> filteredEntries = evidence.getTranscriptEntries().stream()
+            .filter(entry -> batchEntryIds.contains(bytesToUuid(entry.getId())) || shouldKeepTranscriptEntry(entry))
+            .toList();
+
+        if (filteredEntries.size() != evidence.size()) {
+            LOG.infof("  ✓ Filtered transcript entries before extraction: %d -> %d",
+                evidence.size(), filteredEntries.size());
+        }
+
+        return new EvidencePack(filteredEntries);
+    }
+
+    private boolean shouldKeepTranscriptEntry(Entry entry) {
+        if (!"history".equals(entry.getContentType()) || entry.getContentCount() == 0) {
+            return true;
+        }
+
+        var content = entry.getContent(0);
+        if (!content.hasStructValue()) {
+            return true;
+        }
+
+        var struct = content.getStructValue();
+        String role = struct.getFieldsOrDefault("role",
+            Value.newBuilder().setStringValue("").build())
+            .getStringValue();
+        if (!"USER".equals(role)) {
+            return true;
+        }
+
+        String text = struct.getFieldsOrDefault("text",
+            Value.newBuilder().setStringValue("").build())
+            .getStringValue();
+        return salienceScorer.shouldKeep(text);
+    }
+
+    private String bytesToUuid(ByteString bytes) {
+        if (bytes.size() != 16) {
+            throw new IllegalArgumentException("Expected 16 UUID bytes, got " + bytes.size());
+        }
+        ByteBuffer buffer = bytes.asReadOnlyByteBuffer();
+        return new UUID(buffer.getLong(), buffer.getLong()).toString();
     }
 
     /**

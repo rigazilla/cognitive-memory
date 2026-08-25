@@ -1,8 +1,9 @@
 package io.github.rigazilla.memory.cognition.event;
 
+import io.github.rigazilla.memory.cognition.config.SalienceScorerConfig;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
+import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
@@ -10,7 +11,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
-import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
 
@@ -42,7 +42,10 @@ import static java.util.stream.Collectors.joining;
  * <p>Conservative bias: null/empty text always passes through {@link #shouldKeep}.
  * {@link #score} returns 0.0 for null/empty to signal "no extractable content";
  * {@link #shouldKeep} overrides that with a pass-through before scoring, so
- * unscoreable input is never dropped. English-only, v1.
+ * unscoreable input is never dropped.
+ *
+ * <p>English terms are the built-in defaults. Any language is supported by
+ * configuration: override {@code salience.pattern.*} via any SmallRye config source.
  */
 @ApplicationScoped
 public class SalienceScorer {
@@ -51,15 +54,12 @@ public class SalienceScorer {
 
     private static final String BUNDLED_KEYWORDS = "salience/default-keywords.txt";
 
-    // -------------------------------------------------------------------------
     // Score constants — one name per rule, values are independent tuning knobs.
-    // -------------------------------------------------------------------------
-
-    private static final double SCORE_GREETING  = 0.1;  // standalone greeting (hi, hello, hey …)
-    private static final double SCORE_ACK       = 0.2;  // acknowledgment (ok, got it, sure …)
-    private static final double SCORE_FAREWELL  = 0.2;  // farewell (bye, see you, take care …)
-    private static final double SCORE_FILLER    = 0.1;  // filler word (um, uh, hmm, well …)
-    private static final double SCORE_THANKS    = 0.2;  // thanks (thanks, thank you, thx …)
+    private static final double SCORE_GREETING  = 0.1;  // standalone greeting
+    private static final double SCORE_ACK       = 0.2;  // acknowledgment
+    private static final double SCORE_FAREWELL  = 0.2;  // farewell
+    private static final double SCORE_FILLER    = 0.1;  // filler word
+    private static final double SCORE_THANKS    = 0.2;  // thanks
     private static final double SCORE_SHORT     = 0.1;  // message below min-length threshold
     private static final double SCORE_KEYWORD   = 0.8;  // contains a high-salience keyword
     private static final double SCORE_LONG      = 0.9;  // message longer than LENGTH_LONG chars
@@ -75,85 +75,23 @@ public class SalienceScorer {
     private static final int LENGTH_MEDIUM = 20;
     private static final int LENGTH_LONG   = 50;
 
-    // -------------------------------------------------------------------------
-    // Pre-compiled patterns — anchored at both ends (^ and $) so that
-    // "hi, deploy the server" does NOT match GREETING.
-    // -------------------------------------------------------------------------
+    private final SalienceScorerConfig config;
 
-    private static final Pattern GREETING = Pattern.compile(
-            "^(hi|hello|hey|greetings|good morning|good afternoon|good evening)[\\s!.]*$",
-            Pattern.CASE_INSENSITIVE);
+    /** No-arg constructor required by CDI for proxy creation. Not for direct use. */
+    SalienceScorer() {
+        this.config = null;
+    }
 
-    private static final Pattern ACKNOWLEDGMENT = Pattern.compile(
-            "^(ok|okay|sure|got it|understood|sounds good|makes sense|alright)[\\s!.]*$",
-            Pattern.CASE_INSENSITIVE);
+    @Inject
+    public SalienceScorer(SalienceScorerConfig config) {
+        this.config = config;
+    }
 
-    private static final Pattern FAREWELL = Pattern.compile(
-            "^(bye|goodbye|see you|talk later|take care|have a good day)[\\s!.]*$",
-            Pattern.CASE_INSENSITIVE);
-
-    private static final Pattern FILLER = Pattern.compile(
-            "^(um|uh|hmm|well|so|like)[\\s!.]*$",
-            Pattern.CASE_INSENSITIVE);
-
-    private static final Pattern THANKS = Pattern.compile(
-            "^(thanks|thank you|thx|ty)[\\s!.]*$",
-            Pattern.CASE_INSENSITIVE);
-
-    // -------------------------------------------------------------------------
-    // Configuration — all properties are optional; built-in defaults apply when absent.
-    // -------------------------------------------------------------------------
-
-    @ConfigProperty(name = "salience.enabled", defaultValue = "true")
-    boolean enabled;
-
-    @ConfigProperty(name = "salience.threshold", defaultValue = "0.3")
-    double threshold;
-
-    @ConfigProperty(name = "salience.min-length", defaultValue = "10")
-    int minLength;
-
-    @ConfigProperty(name = "salience.pattern.greeting-enabled", defaultValue = "true")
-    boolean greetingEnabled;
-
-    @ConfigProperty(name = "salience.pattern.acknowledgment-enabled", defaultValue = "true")
-    boolean acknowledgmentEnabled;
-
-    @ConfigProperty(name = "salience.pattern.farewell-enabled", defaultValue = "true")
-    boolean farewellEnabled;
-
-    @ConfigProperty(name = "salience.pattern.filler-enabled", defaultValue = "true")
-    boolean fillerEnabled;
-
-    @ConfigProperty(name = "salience.pattern.thanks-enabled", defaultValue = "true")
-    boolean thanksEnabled;
-
-    @ConfigProperty(name = "salience.keywords.enabled", defaultValue = "true")
-    boolean keywordsEnabled;
-
-    /**
-     * Highest-priority keyword override: comma-separated list.
-     * When present, overrides both {@code salience.keywords.file} and the bundled defaults.
-     * Optional; absent by default.
-     */
-    @ConfigProperty(name = "salience.keywords.list")
-    Optional<String> keywordsList;
-
-    /**
-     * Path to an external keyword file (one keyword per line, # comments, blank lines ignored).
-     * When set, used instead of the bundled {@code salience/default-keywords.txt}.
-     * If the file is missing or unreadable, a WARN is logged and bundled defaults are used.
-     * Optional; absent by default.
-     */
-    @ConfigProperty(name = "salience.keywords.file")
-    Optional<String> keywordsFile;
-
-    @ConfigProperty(name = "salience.metrics.enabled", defaultValue = "true")
-    boolean metricsEnabled;
-
-    // -------------------------------------------------------------------------
-    // Metrics — thread-safe counters for extraction-load measurement.
-    // -------------------------------------------------------------------------
+    private volatile Pattern greetingPattern;
+    private volatile Pattern acknowledgmentPattern;
+    private volatile Pattern farewellPattern;
+    private volatile Pattern fillerPattern;
+    private volatile Pattern thanksPattern;
 
     /** Events whose score was ≤ threshold and were dropped (LLM calls avoided). */
     final AtomicLong eventsFiltered = new AtomicLong(0);
@@ -167,24 +105,22 @@ public class SalienceScorer {
     /** Events that scored in the high band (0.7–1.0). */
     final AtomicLong bandHigh = new AtomicLong(0);
 
-    // Compiled once at startup; null when the keyword list is empty.
-    private volatile Pattern keywordPattern;
-
-    // -------------------------------------------------------------------------
-    // Initialisation
-    // -------------------------------------------------------------------------
+    private volatile Pattern keywordPattern; // null when the keyword list is empty
 
     @PostConstruct
     void init() {
+        SalienceScorerConfig.Pattern p = config.pattern();
+        greetingPattern      = compileTermPattern(p.greetings());
+        acknowledgmentPattern = compileTermPattern(p.acknowledgments());
+        farewellPattern      = compileTermPattern(p.farewells());
+        fillerPattern        = compileTermPattern(p.fillers());
+        thanksPattern        = compileTermPattern(p.thanks());
+
         List<String> keywords = loadKeywords();
         keywordPattern = compileKeywordPattern(keywords);
         LOG.infof("SalienceScorer initialised: enabled=%s, threshold=%.2f, keywords=%d",
-                enabled, threshold, keywords.size());
+                config.enabled(), config.threshold(), keywords.size());
     }
-
-    // -------------------------------------------------------------------------
-    // Public API
-    // -------------------------------------------------------------------------
 
     /**
      * Score {@code text} for salience. Returns a value in [0.0, 1.0].
@@ -219,7 +155,7 @@ public class SalienceScorer {
      * @return true if the event should be processed
      */
     public boolean shouldKeep(String text) {
-        if (!enabled) {
+        if (!config.enabled()) {
             return true;
         }
 
@@ -229,9 +165,9 @@ public class SalienceScorer {
         }
 
         double s = scoreInternal(text);
-        boolean keep = s > threshold;
+        boolean keep = s > config.threshold();
 
-        if (metricsEnabled) {
+        if (config.metricsEnabled()) {
             if (keep) {
                 eventsKept.incrementAndGet();
             } else {
@@ -253,10 +189,6 @@ public class SalienceScorer {
 
         return keep;
     }
-
-    // -------------------------------------------------------------------------
-    // Metrics accessors
-    // -------------------------------------------------------------------------
 
     /** Total events filtered (score ≤ threshold) since startup. Equals LLM calls avoided. */
     public long getEventsFiltered() {
@@ -283,11 +215,7 @@ public class SalienceScorer {
         return bandHigh.get();
     }
 
-    // -------------------------------------------------------------------------
-    // Internal scoring — normalizes once; callers must pass non-null, non-blank text
-    // -------------------------------------------------------------------------
-
-    // Sentinel returned by scorePatternMatch when no named pattern matched.
+    // Sentinel: returned by scorePatternMatch when no named pattern matched.
     private static final double NO_MATCH = -1.0;
 
     private double scoreInternal(String text) {
@@ -300,7 +228,7 @@ public class SalienceScorer {
 
         // High salience: keyword match — evaluated before length check so that short
         // but important messages like "bug here" (8 chars) are not filtered by length.
-        if (keywordsEnabled && matchesKeyword(normalized)) {
+        if (matchesKeyword(normalized)) {
             return SCORE_KEYWORD;
         }
 
@@ -313,19 +241,20 @@ public class SalienceScorer {
      * Patterns are anchored at both ends so partial matches are not possible.
      */
     private double scorePatternMatch(String normalized) {
-        if (greetingEnabled && GREETING.matcher(normalized).matches()) {
+        SalienceScorerConfig.Pattern p = config.pattern();
+        if (p.greetingEnabled() && matches(greetingPattern, normalized)) {
             return SCORE_GREETING;
         }
-        if (acknowledgmentEnabled && ACKNOWLEDGMENT.matcher(normalized).matches()) {
+        if (p.acknowledgmentEnabled() && matches(acknowledgmentPattern, normalized)) {
             return SCORE_ACK;
         }
-        if (farewellEnabled && FAREWELL.matcher(normalized).matches()) {
+        if (p.farewellEnabled() && matches(farewellPattern, normalized)) {
             return SCORE_FAREWELL;
         }
-        if (fillerEnabled && FILLER.matcher(normalized).matches()) {
+        if (p.fillerEnabled() && matches(fillerPattern, normalized)) {
             return SCORE_FILLER;
         }
-        if (thanksEnabled && THANKS.matcher(normalized).matches()) {
+        if (p.thanksEnabled() && matches(thanksPattern, normalized)) {
             return SCORE_THANKS;
         }
         return NO_MATCH;
@@ -337,7 +266,7 @@ public class SalienceScorer {
      * high (0.9) band.
      */
     private double scoreLengthAndContent(String normalized) {
-        if (normalized.length() < minLength) {
+        if (normalized.length() < config.minLength()) {
             return SCORE_SHORT;
         }
         if (normalized.length() > LENGTH_LONG) {
@@ -352,9 +281,9 @@ public class SalienceScorer {
         return SCORE_FLOOR;
     }
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
+    private static boolean matches(Pattern pattern, String normalized) {
+        return pattern != null && pattern.matcher(normalized).matches();
+    }
 
     private boolean matchesKeyword(String normalized) {
         return keywordPattern != null && keywordPattern.matcher(normalized).find();
@@ -367,19 +296,40 @@ public class SalienceScorer {
      *   <li>{@code salience.keywords.file} — path to an external file</li>
      *   <li>Bundled classpath resource {@code salience/default-keywords.txt}</li>
      * </ol>
+     *
+     * <p><strong>Empty / comments-only override behaviour:</strong> when an external source
+     * ({@code salience.keywords.list} or {@code salience.keywords.file}) is present but parses
+     * to zero effective keywords (empty file, file containing only blank lines and {@code #}
+     * comments, or a list value that trims to nothing), a WARN is logged and the service falls
+     * back to the bundled defaults. This asymmetry with the bundled-resource path (which aborts
+     * startup on an empty result) is intentional: an empty external override is likely a
+     * misconfiguration that the operator should correct, but it is not a broken build artifact;
+     * continuing with bundled defaults preserves recall at the cost of losing the intended
+     * customisation. Use {@code salience.keywords.enabled=false} to intentionally disable
+     * keyword matching.
      */
     List<String> loadKeywords() {
-        if (keywordsList.isPresent()) {
-            List<String> result = parseKeywordLines(List.of(keywordsList.get().split(",\\s*")));
+        if (config.keywords().list().isPresent()) {
+            List<String> result = parseKeywordLines(config.keywords().list().get());
+            if (result.isEmpty()) {
+                LOG.warnf("SalienceScorer: salience.keywords.list parsed to zero keywords"
+                        + " (empty or comments-only) — falling back to bundled defaults");
+                return loadBundledKeywords(BUNDLED_KEYWORDS);
+            }
             LOG.debugf("SalienceScorer: loaded %d keywords from salience.keywords.list", result.size());
             return result;
         }
 
-        if (keywordsFile.isPresent()) {
-            String path = keywordsFile.get();
+        if (config.keywords().file().isPresent()) {
+            String path = config.keywords().file().get();
             try {
                 String content = Files.readString(Path.of(path), StandardCharsets.UTF_8);
                 List<String> result = parseKeywordLines(content.lines().toList());
+                if (result.isEmpty()) {
+                    LOG.warnf("SalienceScorer: salience.keywords.file '%s' parsed to zero keywords"
+                            + " (empty or comments-only) — falling back to bundled defaults", path);
+                    return loadBundledKeywords(BUNDLED_KEYWORDS);
+                }
                 LOG.infof("SalienceScorer: loaded %d keywords from file: %s", result.size(), path);
                 return result;
             } catch (Exception e) {
@@ -431,8 +381,8 @@ public class SalienceScorer {
     }
 
     /**
-     * Trims lines, lowercases (ROOT locale), skips blanks and {@code #} comments.
-     * Returns an unmodifiable list.
+     * Lowercases with {@code Locale.ROOT} (language-neutral, avoids Turkish-I surprises),
+     * trims, and removes blank lines and {@code #} comments. Returns an unmodifiable list.
      */
     static List<String> parseKeywordLines(List<String> lines) {
         return lines.stream()
@@ -440,6 +390,26 @@ public class SalienceScorer {
                 .filter(l -> !l.isEmpty() && !l.startsWith("#"))
                 .distinct()
                 .toList();
+    }
+
+    /**
+     * Compiles terms into an anchored alternation: {@code ^(term1|term2|…)[\s!.]*$}.
+     * Returns {@code null} when the list is empty; callers must null-check before use.
+     *
+     * <p>Anchoring prevents partial matches — "hi, deploy the server" must not score as
+     * a greeting. {@code CASE_INSENSITIVE | UNICODE_CASE} folds accented characters
+     * correctly; {@code CASE_INSENSITIVE} alone is ASCII-only and would fail non-Latin
+     * overrides (e.g. "Buenos Días" would not match "buenos días").
+     */
+    static Pattern compileTermPattern(List<String> terms) {
+        if (terms == null || terms.isEmpty()) {
+            return null;
+        }
+        String alternation = terms.stream()
+                .map(t -> Pattern.quote(t.strip()))
+                .collect(joining("|"));
+        return Pattern.compile("^(" + alternation + ")[\\s!.]*$",
+                Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     }
 
     /**

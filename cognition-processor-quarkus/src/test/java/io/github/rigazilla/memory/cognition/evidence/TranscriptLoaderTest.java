@@ -106,7 +106,7 @@ class TranscriptLoaderTest {
     }
 
     @Test
-    void testLoadTranscript_FirstBatch_EmptyPageToken() {
+    void testLoadTranscript_FirstBatch_UsesDefaultPagination() {
         // Given: First batch (no previous entry)
         String conversationId = "conv-789";
         String entryId = UUID.randomUUID().toString();
@@ -119,36 +119,64 @@ class TranscriptLoaderTest {
         // When: Load transcript without previous entry
         loader.loadTranscript(conversationId, List.of(entryId), null, "user-123");
 
-        // Then: Should use empty page token
-        ArgumentCaptor<AdminListEntriesRequest> captor = 
+        // Then: Should use default first-page pagination bounded by last entry
+        ArgumentCaptor<AdminListEntriesRequest> captor =
             ArgumentCaptor.forClass(AdminListEntriesRequest.class);
         verify(mockEntriesStub).listEntries(captor.capture());
 
         AdminListEntriesRequest request = captor.getValue();
         assertEquals("", request.getPage().getPageToken());
+        assertEquals(1000, request.getPage().getPageSize());
+        assertEquals(uuidToBytes(entryId), request.getUpToEntryId());
     }
 
     @Test
     void testLoadTranscript_WithUpToEntryId_SetsLimit() {
-        // Given: Batch with last entry ID
+        // Given: Batch with previous entry and last entry ID
         String conversationId = "conv-limit";
+        String previousEntryId = UUID.randomUUID().toString();
         String entryId1 = UUID.randomUUID().toString();
         String entryId2 = UUID.randomUUID().toString();
 
         ListEntriesResponse response = ListEntriesResponse.newBuilder().build();
         when(mockEntriesStub.listEntries(any(AdminListEntriesRequest.class))).thenReturn(response);
 
-        // When: Load transcript with multiple entries
-        loader.loadTranscript(conversationId, List.of(entryId1, entryId2), null, "user-123");
+        // When: Load transcript with previous entry
+        loader.loadTranscript(conversationId, List.of(entryId1, entryId2), previousEntryId, "user-123");
 
         // Then: Should set upToEntryId to last entry
-        ArgumentCaptor<AdminListEntriesRequest> captor = 
+        ArgumentCaptor<AdminListEntriesRequest> captor =
             ArgumentCaptor.forClass(AdminListEntriesRequest.class);
         verify(mockEntriesStub).listEntries(captor.capture());
 
         AdminListEntriesRequest request = captor.getValue();
+        assertEquals(previousEntryId, request.getPage().getPageToken());
         assertTrue(request.hasUpToEntryId());
         assertEquals(uuidToBytes(entryId2), request.getUpToEntryId());
+    }
+
+
+    @Test
+    void testLoadTranscript_FirstBatch_DoesNotSetNonEmptyPageToken() {
+        // Given: First batch with one kept entry
+        String conversationId = "conv-first-batch-no-token";
+        String entryId = UUID.randomUUID().toString();
+
+        ListEntriesResponse response = ListEntriesResponse.newBuilder()
+            .addEntries(createHistoryEntry(entryId, "USER", "Single message"))
+            .build();
+        when(mockEntriesStub.listEntries(any(AdminListEntriesRequest.class))).thenReturn(response);
+
+        // When: Load transcript without previous entry
+        loader.loadTranscript(conversationId, List.of(entryId), null, "user-123");
+
+        // Then: Should leave page token empty on first batch
+        ArgumentCaptor<AdminListEntriesRequest> captor =
+            ArgumentCaptor.forClass(AdminListEntriesRequest.class);
+        verify(mockEntriesStub).listEntries(captor.capture());
+
+        AdminListEntriesRequest request = captor.getValue();
+        assertEquals("", request.getPage().getPageToken());
     }
 
     @Test

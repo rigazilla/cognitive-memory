@@ -1,8 +1,14 @@
 package io.github.rigazilla.memory.cognition.queue;
 
+import com.google.protobuf.ByteString;
+import com.google.protobuf.Struct;
+import com.google.protobuf.Value;
 import io.github.chirino.memory.grpc.v1.AdminConversation;
 import io.github.chirino.memory.grpc.v1.AdminConversationsServiceGrpc;
+import io.github.chirino.memory.grpc.v1.Entry;
 import io.github.rigazilla.memory.cognition.consolidation.ConsolidationService;
+import io.github.rigazilla.memory.cognition.event.SalienceScorer;
+import io.github.rigazilla.memory.cognition.evidence.EvidencePack;
 import io.grpc.ManagedChannel;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
@@ -36,6 +42,7 @@ class JobProcessorTest {
     private AdminConversationsServiceGrpc.AdminConversationsServiceBlockingStub conversationsStub;
     private ManagedChannel mockChannel;
     private ConsolidationService consolidationService;
+    private SalienceScorer salienceScorer;
 
     @BeforeEach
     void setUp() {
@@ -50,6 +57,7 @@ class JobProcessorTest {
         processor.conversationsStub = conversationsStub;
         processor.channel = mockChannel;
         processor.consolidationService = consolidationService;
+        processor.salienceScorer = mock(SalienceScorer.class);
 
         // Set config
         processor.grpcHost = "localhost";
@@ -355,5 +363,57 @@ class JobProcessorTest {
 
         assertEquals(List.of("uuid-3", "uuid-1", "uuid-2"), result,
                 "insertion order of first occurrence must be preserved");
+    }
+
+    @Test
+    void filterEvidenceForBatch_RemovesLowSalienceNonBatchEntries() {
+        when(processor.salienceScorer.shouldKeep("thanks")).thenReturn(false);
+
+        EvidencePack filtered = processor.filterEvidenceForBatch(
+            List.of("00000000-0000-0000-0000-000000000002"),
+            new EvidencePack(List.of(
+                historyEntry("00000000-0000-0000-0000-000000000001", "USER", "thanks"),
+                historyEntry("00000000-0000-0000-0000-000000000002", "USER", "Production rollback is needed")
+            ))
+        );
+
+        assertEquals(1, filtered.size());
+        assertTrue(filtered.formatAsText().contains("Production rollback is needed"));
+        assertFalse(filtered.formatAsText().contains("thanks"));
+    }
+
+    @Test
+    void filterEvidenceForBatch_KeepsBatchEntriesEvenWhenLowSalience() {
+        EvidencePack filtered = processor.filterEvidenceForBatch(
+            List.of("00000000-0000-0000-0000-000000000001"),
+            new EvidencePack(List.of(
+                historyEntry("00000000-0000-0000-0000-000000000001", "USER", "thanks")
+            ))
+        );
+
+        assertEquals(1, filtered.size());
+        assertTrue(filtered.formatAsText().contains("thanks"));
+        verify(processor.salienceScorer, never()).shouldKeep(any());
+    }
+
+    private Entry historyEntry(String id, String role, String text) {
+        Struct struct = Struct.newBuilder()
+            .putFields("role", Value.newBuilder().setStringValue(role).build())
+            .putFields("text", Value.newBuilder().setStringValue(text).build())
+            .build();
+
+        return Entry.newBuilder()
+            .setId(uuidToBytes(id))
+            .setContentType("history")
+            .addContent(Value.newBuilder().setStructValue(struct).build())
+            .build();
+    }
+
+    private ByteString uuidToBytes(String id) {
+        java.util.UUID uuid = java.util.UUID.fromString(id);
+        java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(16);
+        buffer.putLong(uuid.getMostSignificantBits());
+        buffer.putLong(uuid.getLeastSignificantBits());
+        return ByteString.copyFrom(buffer.array());
     }
 }
