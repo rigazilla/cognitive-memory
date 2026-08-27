@@ -41,7 +41,7 @@ class SalienceScorerConfigBindingTest {
                     .build();
 
             SalienceScorerConfig salienceConfig = cfg.getConfigMapping(SalienceScorerConfig.class);
-            SalienceScorer scorer = new SalienceScorer(salienceConfig);
+            SalienceScorer scorer = new SalienceScorer(salienceConfig, new KeywordLoader(salienceConfig));
             scorer.init();
             return scorer;
         }
