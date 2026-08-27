@@ -78,7 +78,8 @@ public class SalienceScorer {
         this.keywordLoader = keywordLoader;
     }
 
-    // Compiled once at @PostConstruct; written once then read-only — plain fields, no volatile needed.
+    // Compiled once at @PostConstruct; the container guarantees safe publication of Pattern instances
+    // via its own synchronisation before any request thread can reach them — plain fields are safe.
     private Pattern greetingPattern;
     private Pattern acknowledgmentPattern;
     private Pattern farewellPattern;
@@ -87,15 +88,16 @@ public class SalienceScorer {
     private Pattern keywordPattern; // null when the keyword list is empty
 
     // Config primitives cached at startup to avoid per-event SmallRye Config lookups on the hot path.
-    private boolean enabled;
-    private double  threshold;
-    private int     minLength;
-    private boolean metricsEnabled;
-    private boolean greetingEnabled;
-    private boolean acknowledgmentEnabled;
-    private boolean farewellEnabled;
-    private boolean fillerEnabled;
-    private boolean thanksEnabled;
+    // volatile ensures the @PostConstruct write (container thread) is visible to request-handling threads.
+    private volatile boolean enabled;
+    private volatile double  threshold;
+    private volatile int     minLength;
+    private volatile boolean metricsEnabled;
+    private volatile boolean greetingEnabled;
+    private volatile boolean acknowledgmentEnabled;
+    private volatile boolean farewellEnabled;
+    private volatile boolean fillerEnabled;
+    private volatile boolean thanksEnabled;
 
     /** Events whose score was ≤ threshold and were dropped (LLM calls avoided). */
     final AtomicLong eventsFiltered = new AtomicLong(0);
