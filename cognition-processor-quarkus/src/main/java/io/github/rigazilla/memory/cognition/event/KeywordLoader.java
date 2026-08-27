@@ -81,8 +81,9 @@ public class KeywordLoader {
      * carries the same diagnostic message rather than escaping unwrapped.
      */
     private List<String> loadBundled(String resourcePath) {
-        try (var is = Thread.currentThread().getContextClassLoader()
-                .getResourceAsStream(resourcePath)) {
+        // KeywordLoader.class resolves via the class's own loader — correct in JVM, dev, and
+        // native regardless of which thread calls this. Leading '/' anchors to classpath root.
+        try (var is = KeywordLoader.class.getResourceAsStream("/" + resourcePath)) {
             if (is == null) {
                 throw new IllegalStateException(
                         "Bundled resource '" + resourcePath + "' not found"
