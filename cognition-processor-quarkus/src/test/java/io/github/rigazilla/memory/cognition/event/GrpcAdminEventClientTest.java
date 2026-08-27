@@ -70,7 +70,7 @@ class GrpcAdminEventClientTest {
         SalienceScorerConfigStub salienceConfig = new SalienceScorerConfigStub();
         salienceConfig.enabled = false;
         salienceConfig.metricsEnabled = false;
-        SalienceScorer scorer = new SalienceScorer(salienceConfig);
+        SalienceScorer scorer = new SalienceScorer(salienceConfig, new KeywordLoader(salienceConfig));
         scorer.init();
         client.salienceScorer = scorer;
         client.objectMapper = new ObjectMapper();
@@ -388,7 +388,8 @@ class GrpcAdminEventClientTest {
 
         /** Installs a fully enabled scorer with bundled keywords loaded. */
         private void useEnabledScorer() {
-            SalienceScorer enabled = new SalienceScorer(new SalienceScorerConfigStub());
+            SalienceScorerConfigStub enabledConfig = new SalienceScorerConfigStub();
+            SalienceScorer enabled = new SalienceScorer(enabledConfig, new KeywordLoader(enabledConfig));
             enabled.init();
             client.salienceScorer = enabled;
         }
