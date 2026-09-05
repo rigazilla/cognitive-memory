@@ -10,9 +10,11 @@ import io.github.chirino.memory.grpc.v1.AdminSearchMemoriesRequest;
 import io.github.chirino.memory.grpc.v1.AdminSearchMemoriesResponse;
 import io.github.chirino.memory.grpc.v1.MemoryItem;
 import io.github.rigazilla.memory.cognition.extraction.MemoryCandidate;
-import io.grpc.ManagedChannel;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.quarkus.arc.ClientProxy;
+import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -25,43 +27,38 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for ExactMatchDuplicateDetector.
+ * Unit tests for ExactMatchDuplicateDetector refactored for Quarkus.
  */
+@QuarkusTest
 class ExactMatchDuplicateDetectorTest {
 
-    private ExactMatchDuplicateDetector detector;
+    @Inject
+    ExactMatchDuplicateDetector detector;
+
     private AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub mockStub;
 
     @BeforeEach
     void setUp() {
-        detector = new ExactMatchDuplicateDetector();
         mockStub = mock(AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub.class);
-        detector.memoriesStub = mockStub;
-        detector.channel = mock(ManagedChannel.class);
-        detector.grpcHost = "localhost";
-        detector.grpcPort = 8082;
-        detector.apiKey = "test-key";
+        ExactMatchDuplicateDetector target = ClientProxy.unwrap(detector);
+        target.memoriesStub = mockStub;
     }
 
     @Test
     void findDuplicates_NoneFound_ReturnsEmptyList() {
-        // Given: search returns no items
         when(mockStub.searchMemories(any(AdminSearchMemoriesRequest.class)))
                 .thenReturn(AdminSearchMemoriesResponse.newBuilder().build());
 
         MemoryCandidate candidate = new MemoryCandidate(
                 "fact", "User prefers Python", 0.9, List.of("E1: citation"));
 
-        // When
         List<MemoryItem> result = detector.findDuplicates("user-1", candidate);
 
-        // Then
         assertTrue(result.isEmpty());
     }
 
     @Test
     void findDuplicates_ExactMatch_ReturnsItem() {
-        // Given: search returns an item whose content exactly matches the candidate
         String content = "User prefers Python";
 
         Struct value = Struct.newBuilder()
@@ -86,10 +83,8 @@ class ExactMatchDuplicateDetectorTest {
         MemoryCandidate candidate = new MemoryCandidate(
                 "fact", content, 0.9, List.of("E1: citation"));
 
-        // When
         List<MemoryItem> result = detector.findDuplicates("user-1", candidate);
 
-        // Then: exact match returned
         assertEquals(1, result.size());
         assertEquals("existing-key-1", result.get(0).getKey());
         assertEquals(3, result.get(0).getRevision());
@@ -97,10 +92,9 @@ class ExactMatchDuplicateDetectorTest {
 
     @Test
     void findDuplicates_FuzzyMatchDifferentContent_FilteredOut() {
-        // Given: search returns an item whose content does NOT exactly match
         Struct value = Struct.newBuilder()
                 .putFields("content", Value.newBuilder()
-                        .setStringValue("User likes Python").build()) // similar but not equal
+                        .setStringValue("User likes Python").build())
                 .build();
 
         AdminMemoryItem adminItem = AdminMemoryItem.newBuilder()
@@ -118,34 +112,26 @@ class ExactMatchDuplicateDetectorTest {
         MemoryCandidate candidate = new MemoryCandidate(
                 "fact", "User prefers Python", 0.9, List.of("E1: citation"));
 
-        // When
         List<MemoryItem> result = detector.findDuplicates("user-1", candidate);
 
-        // Then: fuzzy match filtered out — exact match only
         assertTrue(result.isEmpty());
     }
 
     @Test
     void findDuplicates_SearchThrows_ReturnsEmptyList() {
-        // Given: gRPC call fails
         when(mockStub.searchMemories(any(AdminSearchMemoriesRequest.class)))
                 .thenThrow(new RuntimeException("network error"));
 
         MemoryCandidate candidate = new MemoryCandidate(
                 "fact", "User prefers Python", 0.9, List.of("E1: citation"));
 
-        // When: dedup is best-effort — must not propagate the exception
         List<MemoryItem> result = detector.findDuplicates("user-1", candidate);
 
-        // Then
         assertTrue(result.isEmpty());
     }
 
     @Test
     void findDuplicates_PermissionDenied_ReturnsEmptyList() {
-        // PERMISSION_DENIED is a permanent config error — must still fail-open
-        // (return empty, not throw) while the escalated log level is tested implicitly
-        // (no assertion on log level in unit tests — verified in integration).
         when(mockStub.searchMemories(any(AdminSearchMemoriesRequest.class)))
                 .thenThrow(new StatusRuntimeException(Status.PERMISSION_DENIED));
 
@@ -159,7 +145,6 @@ class ExactMatchDuplicateDetectorTest {
 
     @Test
     void findDuplicates_Unavailable_ReturnsEmptyList() {
-        // Transient UNAVAILABLE (e.g. server restart) must also fail-open.
         when(mockStub.searchMemories(any(AdminSearchMemoriesRequest.class)))
                 .thenThrow(new StatusRuntimeException(Status.UNAVAILABLE));
 
