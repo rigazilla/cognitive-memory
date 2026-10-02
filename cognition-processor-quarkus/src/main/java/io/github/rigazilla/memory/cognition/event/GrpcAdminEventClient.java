@@ -6,6 +6,8 @@ import io.github.chirino.memory.grpc.v1.EventNotification;
 import io.github.chirino.memory.grpc.v1.EventScope;
 import io.github.chirino.memory.grpc.v1.EventStreamServiceGrpc;
 import io.github.chirino.memory.grpc.v1.SubscribeEventsRequest;
+import io.github.rigazilla.memory.cognition.config.CognitionConfig;
+import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.grpc.CallCredentials;
 import io.grpc.ManagedChannel;
@@ -17,7 +19,6 @@ import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
@@ -51,29 +52,11 @@ public class GrpcAdminEventClient {
     private static final Metadata.Key<String> CLIENT_ID_HEADER =
             Metadata.Key.of("x-client-id", Metadata.ASCII_STRING_MARSHALLER);
 
-    @ConfigProperty(name = "memory-service.grpc.host", defaultValue = "localhost")
-    String grpcHost;
+    @Inject
+    MemoryServiceConfig memoryService;
 
-    @ConfigProperty(name = "memory-service.grpc.port", defaultValue = "8082")
-    int grpcPort;
-
-    @ConfigProperty(name = "memory-service.api-key", defaultValue = "admin-api-key-1")
-    String apiKey;
-
-    @ConfigProperty(name = "memory-service.client-id", defaultValue = "cognition-processor")
-    String clientId;
-
-    @ConfigProperty(name = "cognition.worker.id", defaultValue = "worker-1")
-    String workerId;
-    
-    @ConfigProperty(name = "cognition.runtime.id", defaultValue = "quarkus-reference-v1")
-    String runtimeId;
-    
-    @ConfigProperty(name = "cognition.runtime.version", defaultValue = "1")
-    String runtimeVersion;
-
-    @ConfigProperty(name = "cognition.checkpoint.reset-on-startup", defaultValue = "false")
-    boolean resetCheckpointOnStartup;
+    @Inject
+    CognitionConfig cognition;
 
     @Inject
     CheckpointService checkpointService;
@@ -94,7 +77,8 @@ public class GrpcAdminEventClient {
     
     // Track last cursor for checkpointing
     volatile String lastEventCursor;
-    private final AtomicLong eventsAccepted = new AtomicLong(0);
+    // Package-private so tests can reset the counter between test methods
+    final AtomicLong eventsAccepted = new AtomicLong(0);
 
     void onStart(@Observes StartupEvent event) {
         LOG.info("Starting GrpcAdminEventClient");
@@ -122,7 +106,11 @@ public class GrpcAdminEventClient {
 
     private void connect() {
         try {
-            if (resetCheckpointOnStartup) {
+            String workerId = cognition.worker().id();
+            String runtimeId = cognition.runtime().id();
+            String runtimeVersion = cognition.runtime().version();
+
+            if (cognition.checkpoint().resetOnStartup()) {
                 LOG.warnf("Resetting checkpoint for worker %s before subscribing to events", workerId);
                 checkpointService.resetCheckpoint(workerId, runtimeId, runtimeVersion);
             }
@@ -145,7 +133,9 @@ public class GrpcAdminEventClient {
             }
 
             // 2. Create gRPC channel
-            channel = GrpcChannelFactory.create(grpcHost, grpcPort, apiKey, clientId);
+            channel = GrpcChannelFactory.create(
+                    memoryService.grpc().host(), memoryService.grpc().port(),
+                    memoryService.apiKey(), memoryService.clientId());
 
             // 3. Subscribe to admin event stream
             subscribeToEvents(afterCursor);
@@ -169,10 +159,10 @@ public class GrpcAdminEventClient {
             @Override
             public void applyRequestMetadata(RequestInfo requestInfo, Executor appExecutor, MetadataApplier applier) {
                 Metadata metadata = new Metadata();
-                // X-API-Key header for API key authentication
-                metadata.put(API_KEY_HEADER, apiKey);
-                // X-Client-ID header for role mapping to admin
-                metadata.put(CLIENT_ID_HEADER, clientId);
+                    // X-API-Key header for API key authentication
+                    metadata.put(API_KEY_HEADER, memoryService.apiKey());
+                    // X-Client-ID header for role mapping to admin
+                    metadata.put(CLIENT_ID_HEADER, memoryService.clientId());
                 applier.apply(metadata);
             }
 
@@ -225,15 +215,25 @@ public class GrpcAdminEventClient {
             final String jsonData = rawData.isEmpty() ? null : rawData.toStringUtf8();
             String conversationId = null;
             String entryId = null;
+            JsonNode rootNode = null;
 
             if (jsonData != null) {
-                // Extract conversation ID — detail=full entry payloads use "conversationId" (model.Entry JSON tag);
-                // summary payloads and conversation-kind events use "conversation" (outbox schema, doc 090).
-                // "conversation_id" is retained as a defensive fallback; no documented source uses it.
-                conversationId = firstNonNull(jsonData, "conversationId", "conversation_id", "conversation");
+                try {
+                    // Parse JSON once with Jackson to avoid substring-based extraction issues
+                    rootNode = objectMapper.readTree(jsonData);
 
-                // Extract entry ID (for entry events)
-                entryId = firstNonNull(jsonData, "entry", "entry_id", "id");
+                    // Extract conversation ID from root-level fields only
+                    // detail=full entry payloads use "conversationId" (model.Entry JSON tag);
+                    // summary payloads and conversation-kind events use "conversation" (outbox schema, doc 090).
+                    // "conversation_id" is retained as a defensive fallback; no documented source uses it.
+                    conversationId = getFirstNonNull(rootNode, "conversationId", "conversation_id", "conversation");
+
+                    // Extract entry ID from root-level fields only (for entry events)
+                    // This ensures we get the top-level entry UUID, not nested IDs from content
+                    entryId = getFirstNonNull(rootNode, "entry", "entry_id", "id");
+                } catch (Exception e) {
+                    LOG.warnf(e, "Failed to parse event JSON data, skipping field extraction");
+                }
             }
             
             // Update last cursor
@@ -278,7 +278,7 @@ public class GrpcAdminEventClient {
                 // A scorer failure must never drop an event — default to keep on any exception
                 boolean keep;
                 try {
-                    keep = salienceScorer.shouldKeep(extractEntryText(jsonData));
+                    keep = salienceScorer.shouldKeep(extractEntryText(rootNode));
                 } catch (Exception e) {
                     LOG.warnf(e, "salienceScorer.shouldKeep failed — passing event through conservatively");
                     keep = true;
@@ -314,7 +314,8 @@ public class GrpcAdminEventClient {
 
             // Reset checkpoint - the stored cursor is no longer valid
             try {
-                checkpointService.resetCheckpoint(workerId, runtimeId, runtimeVersion);
+                checkpointService.resetCheckpoint(
+                        cognition.worker().id(), cognition.runtime().id(), cognition.runtime().version());
                 LOG.info("✓ Checkpoint reset successful");
             } catch (Exception e) {
                 LOG.errorf(e, "Failed to reset checkpoint");
@@ -343,15 +344,15 @@ public class GrpcAdminEventClient {
      * and returns them joined by a space. Returns {@code null} when no user text is found,
      * which causes the salience gate to pass the event through conservatively.
      *
-     * @param json raw JSON string from the event data field
+     * @param rootNode pre-parsed JSON root node from the event data field
      * @return concatenated user-turn text, or {@code null} if absent or unreadable
      */
-    String extractEntryText(String json) {
-        if (json == null || json.isBlank()) {
+    String extractEntryText(JsonNode rootNode) {
+        if (rootNode == null) {
             return null;
         }
         try {
-            JsonNode contentArray = objectMapper.readTree(json).get("content");
+            JsonNode contentArray = rootNode.get("content");
             if (contentArray == null || !contentArray.isArray() || contentArray.isEmpty()) {
                 return null;
             }
@@ -391,9 +392,29 @@ public class GrpcAdminEventClient {
     }
 
     /**
+     * Returns the value of the first field name in {@code fieldNames} present at the
+     * root level of {@code node}, or {@code null} if none are found.
+     * Only reads root-level fields, never descending into nested objects.
+     */
+    String getFirstNonNull(JsonNode node, String... fieldNames) {
+        if (node == null) {
+            return null;
+        }
+        return Arrays.stream(fieldNames)
+                .map(node::get)
+                .filter(Objects::nonNull)
+                .map(JsonNode::asText)
+                .filter(text -> !text.isEmpty())
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
      * Returns the value of the first field name in {@code fieldNames} present in
      * {@code json}, or {@code null} if none are found.
+     * @deprecated Use {@link #getFirstNonNull(JsonNode, String...)} with parsed JSON instead
      */
+    @Deprecated
     String firstNonNull(String json, String... fieldNames) {
         return Arrays.stream(fieldNames)
                 .map(name -> extractJsonField(json, name))
@@ -413,14 +434,14 @@ public class GrpcAdminEventClient {
             var dirtyWindows = windowRegistry.serializeWindows();
             
             checkpointService.saveCheckpoint(
-                workerId, 
-                lastEventCursor, 
-                runtimeId, 
-                runtimeVersion,
+                cognition.worker().id(),
+                lastEventCursor,
+                cognition.runtime().id(),
+                cognition.runtime().version(),
                 dirtyWindows
             );
-            
-            LOG.infof("✓ Checkpoint saved at cursor: %s (windows: %d, events: %d)", 
+
+            LOG.infof("✓ Checkpoint saved at cursor: %s (windows: %d, events: %d)",
                      lastEventCursor, dirtyWindows.size(), eventsAccepted.get());
 
         } catch (Exception e) {
@@ -490,10 +511,10 @@ public class GrpcAdminEventClient {
     }
     
     public String getHost() {
-        return grpcHost;
+        return memoryService.grpc().host();
     }
-    
+
     public int getPort() {
-        return grpcPort;
+        return memoryService.grpc().port();
     }
 }

@@ -1,25 +1,29 @@
 package io.github.rigazilla.memory.cognition.event;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.protobuf.ByteString;
 import io.github.chirino.memory.grpc.v1.EventNotification;
 import io.github.chirino.memory.grpc.v1.EventScope;
 import io.github.chirino.memory.grpc.v1.EventStreamServiceGrpc;
 import io.github.chirino.memory.grpc.v1.SubscribeEventsRequest;
+import io.github.rigazilla.memory.cognition.config.CognitionConfig;
 import io.grpc.CallCredentials;
 import io.grpc.ManagedChannel;
 import io.grpc.Metadata;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
+import io.quarkus.arc.Arc;
 import io.quarkus.runtime.ShutdownEvent;
 import io.quarkus.runtime.StartupEvent;
+import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.protobuf.ByteString;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -34,7 +38,7 @@ import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for GrpcAdminEventClient.
- * 
+ *
  * Tests cover:
  * - Connection lifecycle (startup, shutdown, reconnect)
  * - Event handling (conversation, entry, invalidate events)
@@ -43,47 +47,34 @@ import static org.mockito.Mockito.*;
  * - JSON field extraction
  * - Metrics tracking
  */
+@QuarkusTest
 class GrpcAdminEventClientTest {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    @Inject
+    GrpcAdminEventClient client;
 
-    private GrpcAdminEventClient client;
-    private CheckpointService checkpointService;
-    private DirtyWindowRegistry windowRegistry;
-    private ManagedChannel mockChannel;
-    private EventStreamServiceGrpc.EventStreamServiceStub mockStub;
+    @Inject
+    CognitionConfig cognition;
+
+    /** The real (non-proxy) bean instance — used for direct field access (lastEventCursor etc.). */
+    private GrpcAdminEventClient realClient;
+
+    @InjectMock
+    CheckpointService checkpointService;
+
+    @InjectMock
+    DirtyWindowRegistry windowRegistry;
 
     @BeforeEach
     void setUp() {
-        client = new GrpcAdminEventClient();
-        checkpointService = mock(CheckpointService.class);
-        windowRegistry = mock(DirtyWindowRegistry.class);
-        mockChannel = mock(ManagedChannel.class);
-        mockStub = mock(EventStreamServiceGrpc.EventStreamServiceStub.class);
-
-        // Inject mocks
-        client.checkpointService = checkpointService;
-        client.windowRegistry = windowRegistry;
-
-        // Install the scorer in pass-through mode so the handleEvent tests below
-        // exercise event routing without salience filtering.
-        SalienceScorerConfigStub salienceConfig = new SalienceScorerConfigStub();
-        salienceConfig.enabled = false;
-        salienceConfig.metricsEnabled = false;
-        SalienceScorer scorer = new SalienceScorer(salienceConfig, new KeywordLoader(salienceConfig));
-        scorer.init();
-        client.salienceScorer = scorer;
-        client.objectMapper = new ObjectMapper();
-
-        // Set config properties
-        client.grpcHost = "localhost";
-        client.grpcPort = 8082;
-        client.apiKey = "test-api-key";
-        client.clientId = "test-client";
-        client.workerId = "test-worker";
-        client.runtimeId = "test-runtime";
-        client.runtimeVersion = "1";
-        client.resetCheckpointOnStartup = false;
+        // Config is wired by CDI from test/resources/application.properties.
+        // CheckpointService and DirtyWindowRegistry are replaced by @InjectMock above.
+        // arc_contextualInstance() returns the actual delegate, not the proxy shell, so
+        // direct field reads/writes (lastEventCursor, eventsAccepted) reach the real bean.
+        realClient = (GrpcAdminEventClient) ((io.quarkus.arc.ClientProxy) client).arc_contextualInstance();
+        // Reset mutable state so tests are independent of execution order
+        realClient.lastEventCursor = null;
+        realClient.eventsAccepted.set(0);
     }
 
 
@@ -91,7 +82,7 @@ class GrpcAdminEventClientTest {
     @Test
     void testOnShutdown_SavesCheckpoint() {
         // Given: Client has processed events
-        client.lastEventCursor = "cursor-final";
+        realClient.lastEventCursor = "cursor-final";
         when(windowRegistry.serializeWindows()).thenReturn(List.of());
 
         // When: Shutdown event is observed
@@ -100,10 +91,10 @@ class GrpcAdminEventClientTest {
 
         // Then: Should save checkpoint
         verify(checkpointService).saveCheckpoint(
-            eq("test-worker"),
+            eq(cognition.worker().id()),
             eq("cursor-final"),
-            eq("test-runtime"),
-            eq("1"),
+            eq(cognition.runtime().id()),
+            eq(cognition.runtime().version()),
             anyList()
         );
     }
@@ -172,7 +163,7 @@ class GrpcAdminEventClientTest {
         client.handleEvent(event);
 
         // Then: Should update last cursor
-        assertEquals("cursor-new", client.lastEventCursor);
+        assertEquals("cursor-new", realClient.lastEventCursor);
     }
 
     @Test
@@ -213,7 +204,11 @@ class GrpcAdminEventClientTest {
         client.handleEvent(event);
 
         // Then: Should reset checkpoint and clear windows
-        verify(checkpointService).resetCheckpoint("test-worker", "test-runtime", "1");
+        verify(checkpointService).resetCheckpoint(
+            cognition.worker().id(),
+            cognition.runtime().id(),
+            cognition.runtime().version()
+        );
         verify(windowRegistry).clear();
     }
 
@@ -310,7 +305,7 @@ class GrpcAdminEventClientTest {
     @Test
     void testSaveCheckpoint_NoCursor_SkipsSave() {
         // Given: No cursor set
-        client.lastEventCursor = null;
+        realClient.lastEventCursor = null;
 
         // When: Save checkpoint
         client.saveCheckpoint();
@@ -324,7 +319,7 @@ class GrpcAdminEventClientTest {
     @Test
     void testSaveCheckpoint_WithCursor_SavesState() {
         // Given: Cursor and windows
-        client.lastEventCursor = "cursor-123";
+        realClient.lastEventCursor = "cursor-123";
         List<SerializedWindow> windows = List.of(
             new SerializedWindow("conv1", "cursor1", "cursor1", List.of(), null, Instant.now(), Instant.now(), Instant.now(), 0)
         );
@@ -335,10 +330,10 @@ class GrpcAdminEventClientTest {
 
         // Then: Should save with cursor and windows
         verify(checkpointService).saveCheckpoint(
-            eq("test-worker"),
+            eq(cognition.worker().id()),
             eq("cursor-123"),
-            eq("test-runtime"),
-            eq("1"),
+            eq(cognition.runtime().id()),
+            eq(cognition.runtime().version()),
             eq(windows)
         );
     }
@@ -346,7 +341,7 @@ class GrpcAdminEventClientTest {
     @Test
     void testSaveCheckpoint_Exception_LogsError() {
         // Given: Checkpoint service throws exception
-        client.lastEventCursor = "cursor-123";
+        realClient.lastEventCursor = "cursor-123";
         when(windowRegistry.serializeWindows()).thenReturn(List.of());
         doThrow(new RuntimeException("Save failed"))
             .when(checkpointService).saveCheckpoint(anyString(), anyString(), anyString(), anyString(), anyList());
@@ -386,12 +381,25 @@ class GrpcAdminEventClientTest {
     @Nested
     class SalienceGate {
 
+        private static final ObjectMapper MAPPER = new ObjectMapper();
+
+        @BeforeEach
+        void installDisabledScorer() {
+            // Install a disabled scorer so that pass-through behaviour is the default
+            // for all SalienceGate tests. Tests that need filtering call useEnabledScorer().
+            SalienceScorerConfigStub disabledConfig = new SalienceScorerConfigStub();
+            disabledConfig.enabled = false;
+            SalienceScorer disabled = new SalienceScorer(disabledConfig, new KeywordLoader(disabledConfig));
+            disabled.init();
+            realClient.salienceScorer = disabled;
+        }
+
         /** Installs a fully enabled scorer with bundled keywords loaded. */
         private void useEnabledScorer() {
             SalienceScorerConfigStub enabledConfig = new SalienceScorerConfigStub();
             SalienceScorer enabled = new SalienceScorer(enabledConfig, new KeywordLoader(enabledConfig));
             enabled.init();
-            client.salienceScorer = enabled;
+            realClient.salienceScorer = enabled;
         }
 
         /**
@@ -507,7 +515,7 @@ class GrpcAdminEventClientTest {
             // The event must still reach the registry — a scorer failure must never drop an event.
             SalienceScorer broken = mock(SalienceScorer.class);
             when(broken.shouldKeep(any())).thenThrow(new RuntimeException("scorer exploded"));
-            client.salienceScorer = broken;
+            realClient.salienceScorer = broken;
 
             client.handleEvent(eventWithText("conv-1", "cur-1", "deploy now"));
 
@@ -528,53 +536,53 @@ class GrpcAdminEventClientTest {
         }
 
         @Test
-        void userTurn_returnsText() {
+        void userTurn_returnsText() throws Exception {
             String json = "{\"content\":[{\"role\":\"USER\",\"text\":\"hi there\"}]}";
-            assertThat(client.extractEntryText(json)).isEqualTo("hi there");
+            assertThat(client.extractEntryText(client.objectMapper.readTree(json))).isEqualTo("hi there");
         }
 
         @Test
-        void multipleUserTurns_joinedBySpace() {
+        void multipleUserTurns_joinedBySpace() throws Exception {
             String json = "{\"content\":["
                     + "{\"role\":\"USER\",\"text\":\"first\"},"
                     + "{\"role\":\"USER\",\"text\":\"second\"}"
                     + "]}";
-            assertThat(client.extractEntryText(json)).isEqualTo("first second");
+            assertThat(client.extractEntryText(client.objectMapper.readTree(json))).isEqualTo("first second");
         }
 
         @Test
-        void assistantOnlyTurn_returnsNull() {
+        void assistantOnlyTurn_returnsNull() throws Exception {
             String json = "{\"content\":[{\"role\":\"ASSISTANT\",\"text\":\"hello\"}]}";
-            assertThat(client.extractEntryText(json)).isNull();
+            assertThat(client.extractEntryText(client.objectMapper.readTree(json))).isNull();
         }
 
         @Test
-        void mixedTurns_onlyUserTextReturned() {
+        void mixedTurns_onlyUserTextReturned() throws Exception {
             String json = "{\"content\":["
                     + "{\"role\":\"ASSISTANT\",\"text\":\"I can help\"},"
                     + "{\"role\":\"USER\",\"text\":\"deploy now\"},"
                     + "{\"role\":\"ASSISTANT\",\"text\":\"done\"}"
                     + "]}";
-            assertThat(client.extractEntryText(json)).isEqualTo("deploy now");
+            assertThat(client.extractEntryText(client.objectMapper.readTree(json))).isEqualTo("deploy now");
         }
 
         @Test
-        void noContentArray_returnsNull() {
+        void noContentArray_returnsNull() throws Exception {
             // Summary-mode payload — only IDs, no content
             String json = "{\"conversation\":\"conv-1\",\"entry\":\"entry-1\"}";
-            assertThat(client.extractEntryText(json)).isNull();
+            assertThat(client.extractEntryText(client.objectMapper.readTree(json))).isNull();
         }
 
         @Test
-        void emptyContentArray_returnsNull() {
+        void emptyContentArray_returnsNull() throws Exception {
             String json = "{\"content\":[]}";
-            assertThat(client.extractEntryText(json)).isNull();
+            assertThat(client.extractEntryText(client.objectMapper.readTree(json))).isNull();
         }
 
         @Test
-        void blankUserText_returnsNull() {
+        void blankUserText_returnsNull() throws Exception {
             String json = "{\"content\":[{\"role\":\"USER\",\"text\":\"   \"}]}";
-            assertThat(client.extractEntryText(json)).isNull();
+            assertThat(client.extractEntryText(client.objectMapper.readTree(json))).isNull();
         }
 
         @Test
@@ -583,19 +591,130 @@ class GrpcAdminEventClientTest {
         }
 
         @Test
-        void blankInput_returnsNull() {
-            assertThat(client.extractEntryText("  ")).isNull();
-        }
-
-        @Test
         void malformedJson_returnsNull() {
-            assertThat(client.extractEntryText("{not valid json")).isNull();
+            // Can't parse malformed JSON to JsonNode, so test with null instead
+            assertThat(client.extractEntryText(null)).isNull();
         }
 
         @Test
-        void userTurn_textIsStripped() {
+        void userTurn_textIsStripped() throws Exception {
             String json = "{\"content\":[{\"role\":\"USER\",\"text\":\"  hi  \"}]}";
-            assertThat(client.extractEntryText(json)).isEqualTo("hi");
+            assertThat(client.extractEntryText(client.objectMapper.readTree(json))).isEqualTo("hi");
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Issue #55 regression tests — detail=full AI-entry ID extraction
+    // -------------------------------------------------------------------------
+
+    @Nested
+    class Issue55RegressionTests {
+
+        @BeforeEach
+        void injectMapper() {
+            client.objectMapper = new ObjectMapper();
+        }
+
+        /**
+         * Regression test for Issue #55: With detail=full, AI entries have a nested
+         * "id" field (chatcmpl-...) inside content that appears before the top-level
+         * entry UUID due to alphabetical ordering. The naive substring extraction
+         * would pick the wrong ID. This test verifies we now extract the correct
+         * top-level UUID.
+         */
+        @Test
+        void detailFullAiEntry_extractsTopLevelUuid_notNestedChatcmplId() {
+            // Given: detail=full AI-entry payload with nested chatcmpl ID
+            // The content array comes before the top-level id due to alphabetical ordering
+            String json = "{"
+                    + "\"conversationId\":\"5ae08594-1234-5678-9abc-def012345678\","
+                    + "\"content\":[{\"content\":[],\"id\":\"chatcmpl-ELmEOK275xyz\",\"role\":\"AI\"}],"
+                    + "\"id\":\"6af18a29-abcd-ef01-2345-6789abcdef01\""
+                    + "}";
+
+            EventNotification event = EventNotification.newBuilder()
+                    .setEvent("entry.created")
+                    .setKind("entry")
+                    .setCursor("cursor-test")
+                    .setData(ByteString.copyFromUtf8(json))
+                    .build();
+
+            // When: Event is handled
+            client.handleEvent(event);
+
+            // Then: Should extract the top-level UUID, not the nested chatcmpl ID
+            verify(windowRegistry).acceptEvent(
+                    eq("5ae08594-1234-5678-9abc-def012345678"),
+                    eq("cursor-test"),
+                    eq("6af18a29-abcd-ef01-2345-6789abcdef01"), // Top-level UUID
+                    any(Instant.class)
+            );
+        }
+
+        /**
+         * Verifies that USER entries (which have no nested ID in content) continue
+         * to work correctly with the new JSON parsing approach.
+         */
+        @Test
+        void detailFullUserEntry_extractsTopLevelUuid() {
+            // Given: detail=full USER-entry payload (no nested ID in content)
+            String json = "{"
+                    + "\"conversationId\":\"b4f91747-2345-6789-abcd-ef0123456789\","
+                    + "\"content\":[{\"role\":\"USER\",\"text\":\"test message\"}],"
+                    + "\"id\":\"c64829e5-3456-789a-bcde-f01234567890\""
+                    + "}";
+
+            EventNotification event = EventNotification.newBuilder()
+                    .setEvent("entry.created")
+                    .setKind("entry")
+                    .setCursor("cursor-user")
+                    .setData(ByteString.copyFromUtf8(json))
+                    .build();
+
+            // When: Event is handled
+            client.handleEvent(event);
+
+            // Then: Should extract the top-level UUID correctly
+            verify(windowRegistry).acceptEvent(
+                    eq("b4f91747-2345-6789-abcd-ef0123456789"),
+                    eq("cursor-user"),
+                    eq("c64829e5-3456-789a-bcde-f01234567890"),
+                    any(Instant.class)
+            );
+        }
+
+        /**
+         * Verifies that multiple nested IDs don't confuse the extraction logic.
+         */
+        @Test
+        void detailFullMultipleAiTurns_extractsTopLevelUuid() {
+            // Given: Multiple AI turns with different chatcmpl IDs
+            String json = "{"
+                    + "\"conversationId\":\"90def1e6-4567-89ab-cdef-012345678901\","
+                    + "\"content\":["
+                    + "{\"content\":[],\"id\":\"chatcmpl-First123\",\"role\":\"AI\"},"
+                    + "{\"content\":[],\"id\":\"chatcmpl-Second456\",\"role\":\"AI\"}"
+                    + "],"
+                    + "\"id\":\"a1b2c3d4-5678-9abc-def0-123456789012\""
+                    + "}";
+
+            EventNotification event = EventNotification.newBuilder()
+                    .setEvent("entry.created")
+                    .setKind("entry")
+                    .setCursor("cursor-multi")
+                    .setData(ByteString.copyFromUtf8(json))
+                    .build();
+
+            // When: Event is handled
+            client.handleEvent(event);
+
+            // Then: Should extract the top-level UUID, ignoring all nested IDs
+            verify(windowRegistry).acceptEvent(
+                    eq("90def1e6-4567-89ab-cdef-012345678901"),
+                    eq("cursor-multi"),
+                    eq("a1b2c3d4-5678-9abc-def0-123456789012"),
+                    any(Instant.class)
+            );
         }
     }
 }
