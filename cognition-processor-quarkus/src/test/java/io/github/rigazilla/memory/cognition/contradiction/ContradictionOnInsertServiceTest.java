@@ -13,9 +13,11 @@ import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -353,6 +355,78 @@ class ContradictionOnInsertServiceTest {
                 "I prefer tea", "2024-01-02T00:00:00Z", 0.9);
 
         verify(mockStub, never()).putMemory(any(AdminPutMemoryRequest.class));
+    }
+
+    // -------------------------------------------------------------------------
+    // Tests — supersedes accumulation (regression for overwrite bug)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Verifies that when a winner memory already carries {@code supersedes: ["key-1"]}
+     * in its struct (from a prior resolution), resolving a second contradiction against
+     * the same winner appends rather than overwrites — resulting in
+     * {@code supersedes: ["key-1", "key-2"]}.
+     *
+     * <p>Setup: the search returns an existing memory ("winner-key") that already has
+     * {@code supersedes: ["key-1"]} plus a new contradicting neighbour ("key-2").
+     * "new-key" (the inserting memory, older timestamp) loses to "winner-key".
+     * The updated winner struct written by the second {@code putMemory} call must
+     * contain both loser keys.
+     */
+    @Test
+    void multipleContradictions_accumulatesSupersedes() {
+        // winner-key already superseded key-1 in a previous run — its struct reflects that.
+        com.google.protobuf.ListValue existingSupersedes = com.google.protobuf.ListValue.newBuilder()
+                .addValues(Value.newBuilder().setStringValue("key-1").build())
+                .build();
+        Struct winnerValue = Struct.newBuilder()
+                .putFields("content",     Value.newBuilder().setStringValue("I prefer tea").build())
+                .putFields("observed_at", Value.newBuilder().setStringValue("2024-01-03T00:00:00Z").build())
+                .putFields("confidence",  Value.newBuilder().setNumberValue(0.9).build())
+                .putFields("supersedes",  Value.newBuilder().setListValue(existingSupersedes).build())
+                .build();
+        AdminMemoryItem winnerNeighbour = AdminMemoryItem.newBuilder()
+                .setKey("winner-key")
+                .setValue(winnerValue)
+                .addNamespace("user").addNamespace("u1").addNamespace("cognition.v1").addNamespace("preference")
+                .setRevision(3)
+                .build();
+
+        // key-2 is another neighbour that will be reported as a non-contradiction
+        // (only "winner-key" contradicts the new memory — and wins because it is newer).
+        AdminMemoryItem loserNeighbour = buildNeighbour("key-2", "I enjoy coffee", "2024-01-01T00:00:00Z");
+
+        when(mockStub.searchMemories(any(AdminSearchMemoriesRequest.class)))
+                .thenReturn(AdminSearchMemoriesResponse.newBuilder()
+                        .addItems(winnerNeighbour)
+                        .addItems(loserNeighbour)
+                        .build());
+
+        // index 0 (winner-key) contradicts the new memory; index 1 (key-2) does not
+        when(mockDetector.detectBatch(any(), any(), any(), any()))
+                .thenReturn(batchResult(
+                        batchContradiction(0, "recency"),
+                        batchNoContradiction(1)));
+
+        // new-key has an older timestamp → winner-key (newer) wins; new-key is superseded
+        service.checkOnInsert("u1", "preference", "new-key",
+                "I prefer green tea", "2024-01-02T00:00:00Z", 0.8);
+
+        // Two putMemory calls: mark new-key superseded, then update winner-key's supersedes list
+        ArgumentCaptor<AdminPutMemoryRequest> captor =
+                ArgumentCaptor.forClass(AdminPutMemoryRequest.class);
+        verify(mockStub, times(2)).putMemory(captor.capture());
+
+        // The second call updates the winner — its supersedes list must include both keys
+        AdminPutMemoryRequest winnerUpdate = captor.getAllValues().get(1);
+        assertEquals("winner-key", winnerUpdate.getKey());
+        List<Value> supersedesValues = winnerUpdate.getValue()
+                .getFieldsOrThrow("supersedes")
+                .getListValue()
+                .getValuesList();
+        assertEquals(2, supersedesValues.size(), "supersedes list should contain two entries");
+        assertEquals("key-1", supersedesValues.get(0).getStringValue());
+        assertEquals("new-key", supersedesValues.get(1).getStringValue());
     }
 
     @Test
