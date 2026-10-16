@@ -110,4 +110,29 @@ class DurableMemoryExtractionProcessTest {
         process.disable();
         assertEquals(ManagedProcessState.DISABLED, process.inspect().state());
     }
+
+    // -------------------------------------------------------------------------
+    // inspect() resource tokenUsage
+    // -------------------------------------------------------------------------
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void inspectResourceTypesContainTokenUsageForExtractorAndVerifier() {
+        ManagedProcessInspection inspection = process.inspect();
+
+        java.util.Map<String, java.util.Map<String, Object>> resourceTypes =
+                (java.util.Map<String, java.util.Map<String, Object>>)
+                        inspection.details().get("resourceTypes");
+        assertNotNull(resourceTypes, "resourceTypes must be present in inspect details");
+
+        java.util.Map<String, Object> extractor = resourceTypes.get("extractor");
+        assertNotNull(extractor, "extractor resource must be present");
+        assertTrue(extractor.containsKey("tokenUsage"),
+                "extractor resource must include tokenUsage");
+
+        java.util.Map<String, Object> verifier = resourceTypes.get("verifier");
+        assertNotNull(verifier, "verifier resource must be present");
+        assertTrue(verifier.containsKey("tokenUsage"),
+                "verifier resource must include tokenUsage");
+    }
 }
