@@ -5,6 +5,7 @@ import io.github.rigazilla.memory.cognition.metadata.MetadataExtractor;
 import io.github.rigazilla.memory.cognition.resource.LlmResourceConfiguration;
 import io.github.rigazilla.memory.cognition.resource.ResourceRequirements;
 import io.github.rigazilla.memory.cognition.resource.ResourceType;
+import io.github.rigazilla.memory.cognition.token.TokenTracker;
 import io.quarkiverse.langchain4j.RegisterAiService;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -34,6 +35,9 @@ public class MetadataEnrichmentProcess implements CognitiveProcess {
 
     @Inject
     Config config;
+
+    @Inject
+    TokenTracker tokenTracker;
 
     private String extractorPrompt;
 
@@ -116,13 +120,14 @@ public class MetadataEnrichmentProcess implements CognitiveProcess {
 
         ResourceRequirements requirements = getResourceRequirements();
         if (requirements != null) {
-            Map<String, Map<String, String>> resourceTypes = new LinkedHashMap<>();
+            Map<String, Map<String, Object>> resourceTypes = new LinkedHashMap<>();
             requirements.getAllResources().forEach((name, resourceConfig) -> {
-                Map<String, String> resourceInfo = new LinkedHashMap<>();
+                Map<String, Object> resourceInfo = new LinkedHashMap<>();
                 resourceInfo.put("type", resourceConfig.getType().name());
                 if (resourceConfig.getType() == ResourceType.LLM) {
                     addLlmDetails(resourceInfo, MetadataExtractor.class);
                     resourceInfo.put("prompt", this.extractorPrompt);
+                    resourceInfo.put("tokenUsage", tokenTracker.snapshot(id(), name));
                 }
                 resourceTypes.put(name, resourceInfo);
             });
@@ -176,7 +181,7 @@ public class MetadataEnrichmentProcess implements CognitiveProcess {
         }
     }
 
-    private void addLlmDetails(Map<String, String> resourceInfo, Class<?> aiServiceClass) {
+    private void addLlmDetails(Map<String, Object> resourceInfo, Class<?> aiServiceClass) {
         RegisterAiService annotation = aiServiceClass.getAnnotation(RegisterAiService.class);
         if (annotation == null) {
             return;
