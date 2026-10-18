@@ -1,18 +1,17 @@
 package io.github.rigazilla.memory.cognition.process;
 
 import io.github.rigazilla.memory.cognition.metadata.MetadataEnrichmentService;
-import org.eclipse.microprofile.config.Config;
+import io.quarkus.test.InjectMock;
+import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -20,31 +19,26 @@ import static org.mockito.Mockito.*;
  *
  * <p>Covers the {@link io.github.rigazilla.memory.cognition.process.CognitiveProcess} contract
  * and the {@link MetadataEnrichmentProcess#inspect()} payload wiring.
- * No CDI container needed — dependencies are injected directly.
- * {@link MetadataEnrichmentService} is mocked so no gRPC channel is required.
+ * Uses {@code @QuarkusTest} so CDI wires config from {@code application.properties}.
+ * {@link MetadataEnrichmentService} is mocked via {@code @InjectMock} so no gRPC channel is required.
  */
+@QuarkusTest
 class MetadataEnrichmentProcessTest {
 
-    private MetadataEnrichmentProcess process;
-    private MetadataEnrichmentService mockService;
+    @Inject
+    MetadataEnrichmentProcess process;
+
+    @InjectMock
+    MetadataEnrichmentService mockService;
 
     @BeforeEach
     void setUp() {
-        // Mock the service so no gRPC channel is required
-        mockService = mock(MetadataEnrichmentService.class);
+        reset(mockService);
         when(mockService.getStatus()).thenReturn("idle");
         when(mockService.getProcessed()).thenReturn(0);
         when(mockService.getEnriched()).thenReturn(0);
         when(mockService.getErrors()).thenReturn(0);
         when(mockService.getLastRunTime()).thenReturn(null);
-
-        // Mock Config so addLlmDetails() does not fail in inspect()
-        Config mockConfig = mock(Config.class);
-        when(mockConfig.getOptionalValue(any(), eq(String.class))).thenReturn(Optional.empty());
-
-        process = new MetadataEnrichmentProcess();
-        process.enrichmentService = mockService;
-        process.config = mockConfig;
     }
 
     // -------------------------------------------------------------------------
@@ -212,7 +206,6 @@ class MetadataEnrichmentProcessTest {
 
     @Test
     void noArgStartDelegatesToParamStart() {
-        // no-arg start() must ultimately call startEnrichmentAsync(null), not the no-arg overload
         process.start();
         verify(mockService).startEnrichmentAsync(null);
         verify(mockService, never()).startEnrichmentAsync();
