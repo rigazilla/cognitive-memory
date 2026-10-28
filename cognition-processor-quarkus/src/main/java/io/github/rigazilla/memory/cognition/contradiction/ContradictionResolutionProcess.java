@@ -1,6 +1,7 @@
 package io.github.rigazilla.memory.cognition.contradiction;
 
 import io.github.rigazilla.memory.cognition.config.CognitionConfig;
+import io.github.rigazilla.memory.cognition.enablement.ProcessEnablementService;
 import io.github.rigazilla.memory.cognition.process.CognitiveProcess;
 import io.github.rigazilla.memory.cognition.process.ManagedProcessInspection;
 import io.github.rigazilla.memory.cognition.process.ManagedProcessState;
@@ -34,6 +35,9 @@ public class ContradictionResolutionProcess implements CognitiveProcess {
 
     @Inject
     ContradictionResolutionService resolutionService;
+
+    @Inject
+    ProcessEnablementService enablementService;
 
     @Inject
     CognitionConfig cognition;
@@ -71,18 +75,35 @@ public class ContradictionResolutionProcess implements CognitiveProcess {
     }
 
     @Override
+    public boolean defaultEnabled() {
+        return true;
+    }
+
+    @Override
     public boolean supportsEnable() {
-        return false;
+        return true;
     }
 
     @Override
     public boolean supportsDisable() {
-        return false;
+        return true;
     }
 
     @Override
     public ManagedProcessState state() {
-        return ManagedProcessState.ENABLED;
+        return enablementService.isEnabled(PROCESS_ID)
+                ? ManagedProcessState.ENABLED
+                : ManagedProcessState.DISABLED;
+    }
+
+    @Override
+    public void enable() {
+        enablementService.enable(PROCESS_ID);
+    }
+
+    @Override
+    public void disable() {
+        enablementService.disable(PROCESS_ID);
     }
 
     // -------------------------------------------------------------------------
