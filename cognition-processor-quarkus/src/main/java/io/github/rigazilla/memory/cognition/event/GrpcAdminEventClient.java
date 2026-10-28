@@ -12,6 +12,8 @@ import io.github.rigazilla.memory.cognition.enablement.EnablementContext;
 import io.github.rigazilla.memory.cognition.enablement.EnablementPolicy;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.github.rigazilla.memory.cognition.process.DurableMemoryExtractionProcess;
+import io.github.rigazilla.memory.cognition.storeall.StoreAllProcess;
+import io.github.rigazilla.memory.cognition.storeall.StoreAllService;
 import io.grpc.CallCredentials;
 import io.grpc.ManagedChannel;
 import io.grpc.Metadata;
@@ -74,6 +76,9 @@ public class GrpcAdminEventClient {
 
     @Inject
     EnablementPolicy enablementPolicy;
+
+    @Inject
+    StoreAllService storeAllService;
 
     @Inject
     ObjectMapper objectMapper;
@@ -314,6 +319,24 @@ public class GrpcAdminEventClient {
                 }
             }
             
+            // --- Store-all gate ---
+            // Independent of the durable-memory-extraction gate above.
+            // Cursor advancement and saveCheckpoint() remain unconditional.
+            if (conversationId != null && cursor != null) {
+                EnablementContext storeAllCtx = new EnablementContext(
+                        StoreAllProcess.PROCESS_ID,
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.ofNullable(conversationId),
+                        Map.of());
+                if (!enablementPolicy.decide(storeAllCtx).enabled()) {
+                    LOG.debugf("store-all disabled — skipping event for conversation %s",
+                            conversationId);
+                } else {
+                    storeAllService.handle(conversationId, cursor, entryId, rootNode);
+                }
+            }
+
             // Periodic checkpoint (every 10 events)
             if (eventNumber % 10 == 0) {
                 saveCheckpoint();
