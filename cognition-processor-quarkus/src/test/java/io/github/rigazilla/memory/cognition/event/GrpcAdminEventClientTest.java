@@ -1,5 +1,7 @@
 package io.github.rigazilla.memory.cognition.event;
 
+import io.github.rigazilla.memory.cognition.storeall.StoreAllProcess;
+import io.github.rigazilla.memory.cognition.storeall.StoreAllService;
 import io.github.chirino.memory.grpc.v1.EventNotification;
 import io.github.chirino.memory.grpc.v1.EventScope;
 import io.github.chirino.memory.grpc.v1.EventStreamServiceGrpc;
@@ -66,6 +68,9 @@ class GrpcAdminEventClientTest {
     @InjectMock
     DirtyWindowRegistry windowRegistry;
 
+    @InjectMock
+    StoreAllService storeAllService;
+
     @Inject
     ProcessEnablementService enablementService;
 
@@ -79,6 +84,11 @@ class GrpcAdminEventClientTest {
         // Reset mutable state so tests are independent of execution order
         realClient.lastEventCursor = null;
         realClient.eventsAccepted.set(0);
+        // Reset enablement overrides so each test starts from the default state.
+        // Without this, enablement changes in one nested class bleed into others.
+        ProcessEnablementService realEnablementService = (ProcessEnablementService)
+                ((io.quarkus.arc.ClientProxy) enablementService).arc_contextualInstance();
+        realEnablementService.resetOverrides();
     }
 
 
@@ -793,6 +803,87 @@ class GrpcAdminEventClientTest {
                 client.handleEvent(conversationEvent("conv-1", "cur-1"));
     
                 verify(windowRegistry).acceptEvent(eq("conv-1"), eq("cur-1"), any(), any(Instant.class));
+            }
+        }
+
+        // -------------------------------------------------------------------------
+        // Store-all enablement gate
+        // -------------------------------------------------------------------------
+
+        @Nested
+        class StoreAllEnablementGate {
+
+            @BeforeEach
+            void resetEnablement() {
+                ProcessEnablementService real = (ProcessEnablementService)
+                        ((io.quarkus.arc.ClientProxy) enablementService).arc_contextualInstance();
+                real.resetOverrides();
+                realClient.eventsAccepted.set(0);
+            }
+
+            private EventNotification entryEvent(String conversationId, String cursor) {
+                // Use a high-salience message (length > 50) so the salience gate passes it through.
+                String json = "{\"conversationId\":\"" + conversationId + "\","
+                        + "\"content\":[{\"role\":\"USER\",\"text\":"
+                        + "\"I want to configure the deployment pipeline for the staging environment\"}],"
+                        + "\"id\":\"" + java.util.UUID.randomUUID() + "\"}";
+                return EventNotification.newBuilder()
+                        .setEvent("entry.created")
+                        .setKind("entry")
+                        .setCursor(cursor)
+                        .setData(com.google.protobuf.ByteString.copyFromUtf8(json))
+                        .build();
+            }
+
+            @Test
+            void disabled_storeAllHandleIsNotCalled() {
+                // store-all is DISABLED by default
+                client.handleEvent(entryEvent("conv-sa-1", "cur-sa-1"));
+
+                verify(storeAllService, never()).handle(anyString(), anyString(), any(), any());
+            }
+
+            @Test
+            void enabled_storeAllHandleIsCalled() {
+                enablementService.enable(StoreAllProcess.PROCESS_ID);
+
+                client.handleEvent(entryEvent("conv-sa-2", "cur-sa-2"));
+
+                verify(storeAllService).handle(eq("conv-sa-2"), eq("cur-sa-2"), any(), any());
+            }
+
+            @Test
+            void disabled_cursorStillAdvances() {
+                // store-all disabled by default — cursor must still advance
+                client.handleEvent(entryEvent("conv-sa-3", "cur-sa-advance"));
+
+                assertEquals("cur-sa-advance", realClient.lastEventCursor,
+                        "Cursor must advance even when store-all is disabled");
+            }
+
+            @Test
+            void disablingStoreAll_doesNotAffectDurableExtraction() {
+                // Both start in default state; durable is enabled, store-all is disabled.
+                // Disabling store-all must not affect durable's gate.
+                client.handleEvent(entryEvent("conv-sa-4", "cur-sa-4"));
+
+                // durable gate should have opened the window
+                verify(windowRegistry).acceptEvent(eq("conv-sa-4"), eq("cur-sa-4"), any(), any(Instant.class));
+                // store-all gate should not have called handle
+                verify(storeAllService, never()).handle(anyString(), anyString(), any(), any());
+            }
+
+            @Test
+            void disablingDurable_doesNotAffectStoreAll() {
+                enablementService.enable(StoreAllProcess.PROCESS_ID);
+                enablementService.disable("durable-memory-extraction");
+
+                client.handleEvent(entryEvent("conv-sa-5", "cur-sa-5"));
+
+                // durable gate must not have opened the window
+                verify(windowRegistry, never()).acceptEvent(anyString(), anyString(), anyString(), any());
+                // store-all gate must have called handle
+                verify(storeAllService).handle(eq("conv-sa-5"), eq("cur-sa-5"), any(), any());
             }
         }
     }
