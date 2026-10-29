@@ -20,6 +20,7 @@ import io.grpc.ManagedChannel;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.context.control.ActivateRequestContext;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -122,6 +123,7 @@ public class ContradictionOnInsertService {
      * @param observedAt ISO-8601 timestamp of the new memory (may be empty)
      * @param confidence confidence score of the new memory (0.0–1.0)
      */
+    @ActivateRequestContext
     public void checkOnInsert(String userId, String memoryType,
                               String newKey, String content,
                               String observedAt, double confidence) {

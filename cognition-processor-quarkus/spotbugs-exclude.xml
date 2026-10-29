@@ -49,4 +49,31 @@
     <Match>
         <Bug pattern="SIC_INNER_SHOULD_BE_STATIC_ANON"/>
     </Match>
+
+    <!-- gRPC fields (channel, stub) are set in @PostConstruct and used at runtime;
+         SpotBugs incorrectly reports them as unused because it cannot see CDI lifecycle -->
+    <Match>
+        <Bug pattern="UUF_UNUSED_FIELD"/>
+        <Package name="~io\.github\.rigazilla\.memory\.cognition\..*"/>
+    </Match>
+
+    <!-- RuntimeException subclasses used as CDI exception wrappers may throw from
+         constructor — this is the standard Java pattern and is not a security risk here -->
+    <Match>
+        <Bug pattern="CT_CONSTRUCTOR_THROW"/>
+        <Package name="~io\.github\.rigazilla\.memory\.cognition\..*"/>
+    </Match>
+
+    <!-- Private methods called via CDI proxies or virtual threads are not detected by
+         SpotBugs static analysis -->
+    <Match>
+        <Bug pattern="UPM_UNCALLED_PRIVATE_METHOD"/>
+        <Package name="~io\.github\.rigazilla\.memory\.cognition\..*"/>
+    </Match>
+
+    <!-- volatile fields written via direct field assignment are not recognized by SpotBugs -->
+    <Match>
+        <Bug pattern="UWF_UNWRITTEN_FIELD"/>
+        <Package name="~io\.github\.rigazilla\.memory\.cognition\..*"/>
+    </Match>
 </FindBugsFilter>

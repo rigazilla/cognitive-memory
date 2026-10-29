@@ -12,6 +12,8 @@ import io.github.chirino.memory.grpc.v1.AdminMemoriesServiceGrpc;
 import io.github.chirino.memory.grpc.v1.AdminPutMemoryRequest;
 import io.github.rigazilla.memory.cognition.consolidation.ResolvedCandidate;
 import io.github.rigazilla.memory.cognition.contradiction.ContradictionOnInsertService;
+import io.github.rigazilla.memory.cognition.contradiction.ContradictionResolutionProcess;
+import io.github.rigazilla.memory.cognition.enablement.ProcessEnablementService;
 import io.github.rigazilla.memory.cognition.extraction.MemoryCandidate;
 import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
@@ -44,6 +46,9 @@ public class MemoryWriter {
 
     @Inject
     ContradictionOnInsertService contradictionOnInsertService;
+
+    @Inject
+    ProcessEnablementService enablementService;
 
     ManagedChannel channel;
     AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub memoriesStub;
@@ -231,10 +236,13 @@ public class MemoryWriter {
                 bytesToUuid(result.getId()), candidate.type(), key, resolved.isUpdate());
 
         // Trigger on-insert contradiction detection against semantic neighbours.
+        // Skipped when contradiction-resolution is disabled.
         // This is best-effort; failures are logged inside the service and never block writes.
-        contradictionOnInsertService.checkOnInsert(
-                userId, candidate.type(), key,
-                candidate.content(), observedAt, candidate.confidence());
+        if (enablementService.isEnabled(ContradictionResolutionProcess.PROCESS_ID)) {
+            contradictionOnInsertService.checkOnInsert(
+                    userId, candidate.type(), key,
+                    candidate.content(), observedAt, candidate.confidence());
+        }
 
         return result;
     }
