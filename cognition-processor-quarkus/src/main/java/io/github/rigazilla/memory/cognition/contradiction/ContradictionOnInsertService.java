@@ -28,6 +28,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Contradiction detection triggered at memory-insertion time.
@@ -80,6 +81,18 @@ public class ContradictionOnInsertService {
     AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub memoriesStub;
 
     // -------------------------------------------------------------------------
+    // Metrics (package-private for test access)
+    // -------------------------------------------------------------------------
+
+    final AtomicLong checksPerformed = new AtomicLong(0);
+    final AtomicLong contradictionsFound = new AtomicLong(0);
+    final AtomicLong contradictionsResolved = new AtomicLong(0);
+    final AtomicLong errors = new AtomicLong(0);
+    final AtomicLong batchCallsSucceeded = new AtomicLong(0);
+    final AtomicLong batchCallsFailed = new AtomicLong(0);
+    final AtomicLong fallbackCallsUsed = new AtomicLong(0);
+
+    // -------------------------------------------------------------------------
     // Lifecycle
     // -------------------------------------------------------------------------
 
@@ -106,6 +119,14 @@ public class ContradictionOnInsertService {
     // Public API
     // -------------------------------------------------------------------------
 
+    public long getChecksPerformed() { return checksPerformed.get(); }
+    public long getContradictionsFound() { return contradictionsFound.get(); }
+    public long getContradictionsResolved() { return contradictionsResolved.get(); }
+    public long getErrors() { return errors.get(); }
+    public long getBatchCallsSucceeded() { return batchCallsSucceeded.get(); }
+    public long getBatchCallsFailed() { return batchCallsFailed.get(); }
+    public long getFallbackCallsUsed() { return fallbackCallsUsed.get(); }
+
     /**
      * Run contradiction detection for a newly inserted memory.
      *
@@ -127,9 +148,11 @@ public class ContradictionOnInsertService {
     public void checkOnInsert(String userId, String memoryType,
                               String newKey, String content,
                               String observedAt, double confidence) {
+        checksPerformed.incrementAndGet();
         try {
             doCheckOnInsert(userId, memoryType, newKey, content, observedAt, confidence);
         } catch (Exception e) {
+            errors.incrementAndGet();
             LOG.warnf(e, "Contradiction on-insert check failed for key=%s userId=%s; skipping",
                     newKey, userId);
         }
@@ -201,10 +224,12 @@ public class ContradictionOnInsertService {
         try {
             ContradictionBatchResult batchResult = llmRetryHelper.withRetry(
                     "contradiction-detect-batch:" + newItem.getKey(),
-                    () -> TokenTrackingContext.call(ContradictionResolutionProcess.PROCESS_ID, "detector",
+                    () -> TokenTrackingContext.call(ContradictionOnInsertProcess.PROCESS_ID, "detector",
                             () -> detector.detectBatch(memoryType, newContent, newObservedAt, candidatesJson)));
             batchResults = (batchResult != null) ? batchResult.results() : null;
+            batchCallsSucceeded.incrementAndGet();
         } catch (Exception e) {
+            batchCallsFailed.incrementAndGet();
             LOG.warnf(e, "Batch contradiction detection failed for key=%s; falling back to per-pair",
                     newItem.getKey());
             // Full fallback: check each pair individually
@@ -228,6 +253,7 @@ public class ContradictionOnInsertService {
 
             if (response == null) {
                 // The model truncated the array — fall back to single-pair for this candidate
+                fallbackCallsUsed.incrementAndGet();
                 LOG.debugf(
                         "Batch result missing index=%d (key=%s); falling back to single-pair detect",
                         i, neighbour.getKey());
@@ -259,7 +285,7 @@ public class ContradictionOnInsertService {
 
             ContradictionDetectionResponse response = llmRetryHelper.withRetry(
                     "contradiction-detect:" + pair.keyA() + ":" + pair.keyB(),
-                    () -> TokenTrackingContext.call(ContradictionResolutionProcess.PROCESS_ID, "detector",
+                    () -> TokenTrackingContext.call(ContradictionOnInsertProcess.PROCESS_ID, "detector",
                             () -> detector.detect(
                                     pair.memoryType(),
                                     pair.contentA(), nullSafe(pair.observedAtA()),
@@ -283,6 +309,7 @@ public class ContradictionOnInsertService {
             return;
         }
 
+        contradictionsFound.incrementAndGet();
         LOG.infof("Contradiction detected on insert [%s]: keyA=%s keyB=%s type=%s strategy=%s — %s",
                 memoryType, newItem.getKey(), neighbour.getKey(),
                 response.contradictionType().value(), response.recommendedStrategy().value(),
@@ -387,6 +414,7 @@ public class ContradictionOnInsertService {
                 .setExpectedRevision(loser.getRevision())
                 .build());
 
+        contradictionsResolved.incrementAndGet();
         LOG.infof("Marked memory superseded on insert: key=%s superseded_by=%s strategy=%s",
                 loser.getKey(), resolution.winnerKey(), resolution.strategyApplied().value());
 
