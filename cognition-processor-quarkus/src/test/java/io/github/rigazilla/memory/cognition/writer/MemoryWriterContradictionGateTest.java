@@ -4,8 +4,8 @@ import com.google.protobuf.ByteString;
 import io.github.chirino.memory.grpc.v1.AdminMemoriesServiceGrpc;
 import io.github.chirino.memory.grpc.v1.AdminPutMemoryRequest;
 import io.github.chirino.memory.grpc.v1.MemoryWriteResult;
+import io.github.rigazilla.memory.cognition.contradiction.ContradictionOnInsertProcess;
 import io.github.rigazilla.memory.cognition.contradiction.ContradictionOnInsertService;
-import io.github.rigazilla.memory.cognition.contradiction.ContradictionResolutionProcess;
 import io.github.rigazilla.memory.cognition.enablement.ProcessEnablementService;
 import io.github.rigazilla.memory.cognition.extraction.MemoryCandidate;
 import io.github.rigazilla.memory.cognition.model.Provenance;
@@ -80,7 +80,7 @@ class MemoryWriterContradictionGateTest {
 
     @Test
     void checkOnInsertIsSkippedWhenContradictionResolutionDisabled() {
-        enablementService.disable(ContradictionResolutionProcess.PROCESS_ID);
+        enablementService.disable(ContradictionOnInsertProcess.PROCESS_ID);
 
         MemoryCandidate candidate = new MemoryCandidate("fact", "User prefers dark mode", 0.9, List.of("e1"));
         Provenance provenance = createProvenance("conv-1", List.of("e1"));
