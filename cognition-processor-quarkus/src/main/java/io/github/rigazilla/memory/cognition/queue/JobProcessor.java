@@ -18,6 +18,7 @@ import io.github.rigazilla.memory.cognition.extraction.DurableMemoryExtractor;
 import io.github.rigazilla.memory.cognition.extraction.MemoryCandidate;
 import io.github.rigazilla.memory.cognition.config.CognitionConfig;
 import io.github.rigazilla.memory.cognition.process.DurableMemoryExtractionProcess;
+import io.github.rigazilla.memory.cognition.auth.MemoryServiceAuth;
 import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.github.rigazilla.memory.cognition.model.Provenance;
@@ -72,6 +73,9 @@ public class JobProcessor {
 
     @Inject
     MemoryServiceConfig memoryService;
+
+    @Inject
+    MemoryServiceAuth memoryServiceAuth;
 
     @Inject
     CognitionConfig cognition;
@@ -131,7 +135,7 @@ public class JobProcessor {
         // Create gRPC channel with authentication interceptor
         channel = GrpcChannelFactory.create(
                 memoryService.grpc().host(), memoryService.grpc().port(),
-                memoryService.apiKey(), memoryService.clientId());
+                memoryServiceAuth.channelInterceptor());
 
         conversationsStub = AdminConversationsServiceGrpc.newBlockingStub(channel);
 

@@ -9,6 +9,7 @@ import io.github.chirino.memory.grpc.v1.AdminListMemoriesResponse;
 import io.github.chirino.memory.grpc.v1.AdminMemoriesServiceGrpc;
 import io.github.chirino.memory.grpc.v1.AdminMemoryItem;
 import io.github.chirino.memory.grpc.v1.AdminPutMemoryRequest;
+import io.github.rigazilla.memory.cognition.auth.MemoryServiceAuth;
 import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.grpc.ManagedChannel;
@@ -50,6 +51,9 @@ public class TemporalMetadataEnrichmentService {
 
     @Inject
     MemoryServiceConfig memoryService;
+
+    @Inject
+    MemoryServiceAuth memoryServiceAuth;
 
     ManagedChannel channel;
     AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub memoriesStub;
@@ -94,7 +98,7 @@ public class TemporalMetadataEnrichmentService {
                 memoryService.grpc().host(), memoryService.grpc().port());
         channel = GrpcChannelFactory.create(
                 memoryService.grpc().host(), memoryService.grpc().port(),
-                memoryService.apiKey(), memoryService.clientId());
+                memoryServiceAuth.channelInterceptor());
         memoriesStub = AdminMemoriesServiceGrpc.newBlockingStub(channel);
         LOG.info("TemporalMetadataEnrichmentService initialized successfully");
     }

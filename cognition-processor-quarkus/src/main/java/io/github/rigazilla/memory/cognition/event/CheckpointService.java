@@ -8,6 +8,7 @@ import io.github.chirino.memory.grpc.v1.AdminCheckpoint;
 import io.github.chirino.memory.grpc.v1.AdminCheckpointServiceGrpc;
 import io.github.chirino.memory.grpc.v1.GetCheckpointRequest;
 import io.github.chirino.memory.grpc.v1.PutCheckpointRequest;
+import io.github.rigazilla.memory.cognition.auth.MemoryServiceAuth;
 import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.grpc.ManagedChannel;
@@ -37,6 +38,9 @@ public class CheckpointService {
     @Inject
     MemoryServiceConfig memoryService;
 
+    @Inject
+    MemoryServiceAuth memoryServiceAuth;
+
     ManagedChannel channel;
     AdminCheckpointServiceGrpc.AdminCheckpointServiceBlockingStub checkpointStub;
 
@@ -58,7 +62,7 @@ public class CheckpointService {
         // Create gRPC channel with authentication interceptor
         channel = GrpcChannelFactory.create(
                 memoryService.grpc().host(), memoryService.grpc().port(),
-                memoryService.apiKey(), memoryService.clientId());
+                memoryServiceAuth.channelInterceptor());
 
         // Create blocking stub for synchronous checkpoint operations
         checkpointStub = AdminCheckpointServiceGrpc.newBlockingStub(channel);

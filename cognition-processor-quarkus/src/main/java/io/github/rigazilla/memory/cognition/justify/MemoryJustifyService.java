@@ -9,6 +9,7 @@ import io.github.chirino.memory.grpc.v1.AdminGetMemoryRequest;
 import io.github.chirino.memory.grpc.v1.AdminMemoriesServiceGrpc;
 import io.github.chirino.memory.grpc.v1.AdminMemoryItem;
 import io.github.chirino.memory.grpc.v1.Entry;
+import io.github.rigazilla.memory.cognition.auth.MemoryServiceAuth;
 import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.grpc.ManagedChannel;
@@ -39,6 +40,9 @@ public class MemoryJustifyService {
     @Inject
     MemoryServiceConfig memoryService;
 
+    @Inject
+    MemoryServiceAuth memoryServiceAuth;
+
     ManagedChannel channel;
     AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub memoriesStub;
     AdminEntriesServiceGrpc.AdminEntriesServiceBlockingStub entriesStub;
@@ -51,7 +55,7 @@ public class MemoryJustifyService {
         // Create gRPC channel with authentication interceptor
         channel = GrpcChannelFactory.create(
                 memoryService.grpc().host(), memoryService.grpc().port(),
-                memoryService.apiKey(), memoryService.clientId());
+                memoryServiceAuth.channelInterceptor());
         
         memoriesStub = AdminMemoriesServiceGrpc.newBlockingStub(channel);
         entriesStub = AdminEntriesServiceGrpc.newBlockingStub(channel);

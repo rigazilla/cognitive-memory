@@ -8,6 +8,7 @@ import io.github.chirino.memory.grpc.v1.MemoryItem;
 import io.github.chirino.memory.grpc.v1.AdminSearchMemoriesRequest;
 import io.github.chirino.memory.grpc.v1.AdminSearchMemoriesResponse;
 import java.util.stream.Collectors;
+import io.github.rigazilla.memory.cognition.auth.MemoryServiceAuth;
 import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.writer.MemoryWriter;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
@@ -39,6 +40,9 @@ public class ProfileContextService {
     MemoryServiceConfig memoryService;
 
     @Inject
+    MemoryServiceAuth memoryServiceAuth;
+
+    @Inject
     ProfileConsolidationStrategy consolidationStrategy;
     
     @Inject
@@ -55,7 +59,7 @@ public class ProfileContextService {
         // Create gRPC channel with authentication
         channel = GrpcChannelFactory.create(
                 memoryService.grpc().host(), memoryService.grpc().port(),
-                memoryService.apiKey());
+                memoryServiceAuth.channelInterceptor());
         
         // Use admin stub for searching and writing memories on behalf of users
         memoriesStub = AdminMemoriesServiceGrpc.newBlockingStub(channel);

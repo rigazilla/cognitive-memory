@@ -7,6 +7,7 @@ import io.github.chirino.memory.grpc.v1.Channel;
 import io.github.chirino.memory.grpc.v1.Entry;
 import io.github.chirino.memory.grpc.v1.ListEntriesResponse;
 import io.github.chirino.memory.grpc.v1.PageRequest;
+import io.github.rigazilla.memory.cognition.auth.MemoryServiceAuth;
 import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.grpc.ManagedChannel;
@@ -32,6 +33,9 @@ public class TranscriptLoader {
     @Inject
     MemoryServiceConfig memoryService;
 
+    @Inject
+    MemoryServiceAuth memoryServiceAuth;
+
     ManagedChannel channel;
     AdminEntriesServiceGrpc.AdminEntriesServiceBlockingStub entriesStub;
     
@@ -43,7 +47,7 @@ public class TranscriptLoader {
         // Create gRPC channel with authentication interceptor
         channel = GrpcChannelFactory.create(
                 memoryService.grpc().host(), memoryService.grpc().port(),
-                memoryService.apiKey());
+                memoryServiceAuth.channelInterceptor());
 
         // Create admin stub (no on-behalf-of needed, admin has full access)
         entriesStub = AdminEntriesServiceGrpc.newBlockingStub(channel);

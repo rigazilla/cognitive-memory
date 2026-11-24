@@ -2,6 +2,7 @@ package io.github.rigazilla.memory.cognition.grpc;
 
 import io.github.chirino.memory.grpc.v1.AdminConversationsServiceGrpc;
 import io.github.chirino.memory.grpc.v1.AdminGetConversationRequest;
+import io.github.rigazilla.memory.cognition.auth.MemoryServiceAuth;
 import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.grpc.ManagedChannel;
 import io.grpc.Status;
@@ -24,6 +25,9 @@ public class ConversationOwnerResolver {
     @Inject
     MemoryServiceConfig memoryService;
 
+    @Inject
+    MemoryServiceAuth memoryServiceAuth;
+
     ManagedChannel channel;
     AdminConversationsServiceGrpc.AdminConversationsServiceBlockingStub conversationsStub;
 
@@ -33,7 +37,7 @@ public class ConversationOwnerResolver {
                 memoryService.grpc().host(), memoryService.grpc().port());
         channel = GrpcChannelFactory.create(
                 memoryService.grpc().host(), memoryService.grpc().port(),
-                memoryService.apiKey(), memoryService.clientId());
+                memoryServiceAuth.channelInterceptor());
         conversationsStub = AdminConversationsServiceGrpc.newBlockingStub(channel);
         LOG.info("ConversationOwnerResolver initialized successfully");
     }

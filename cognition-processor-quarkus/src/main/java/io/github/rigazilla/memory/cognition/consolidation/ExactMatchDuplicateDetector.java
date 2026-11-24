@@ -4,6 +4,7 @@ import io.github.chirino.memory.grpc.v1.AdminMemoriesServiceGrpc;
 import io.github.chirino.memory.grpc.v1.AdminSearchMemoriesRequest;
 import io.github.chirino.memory.grpc.v1.AdminSearchMemoriesResponse;
 import io.github.chirino.memory.grpc.v1.MemoryItem;
+import io.github.rigazilla.memory.cognition.auth.MemoryServiceAuth;
 import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.extraction.MemoryCandidate;
 import io.grpc.ManagedChannel;
@@ -40,6 +41,9 @@ public class ExactMatchDuplicateDetector implements DuplicateDetector {
     @Inject
     MemoryServiceConfig memoryService;
 
+    @Inject
+    MemoryServiceAuth memoryServiceAuth;
+
     ManagedChannel channel;
     AdminMemoriesServiceGrpc.AdminMemoriesServiceBlockingStub memoriesStub;
 
@@ -49,7 +53,7 @@ public class ExactMatchDuplicateDetector implements DuplicateDetector {
                 memoryService.grpc().host(), memoryService.grpc().port());
         channel = GrpcChannelFactory.create(
                 memoryService.grpc().host(), memoryService.grpc().port(),
-                memoryService.apiKey());
+                memoryServiceAuth.channelInterceptor());
         memoriesStub = AdminMemoriesServiceGrpc.newBlockingStub(channel);
         LOG.info("ExactMatchDuplicateDetector initialized successfully");
     }

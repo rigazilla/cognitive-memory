@@ -1,17 +1,19 @@
 package io.github.rigazilla.memory.cognition.grpc;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.grpc.CallOptions;
 import io.grpc.Channel;
 import io.grpc.ClientCall;
-import io.grpc.Metadata;
+import io.grpc.ClientInterceptor;
+import io.grpc.ManagedChannel;
 import io.grpc.MethodDescriptor;
-import org.junit.jupiter.api.Test;
-
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.Test;
 
 class GrpcChannelFactoryTest {
 
@@ -36,65 +38,26 @@ class GrpcChannelFactoryTest {
             .build();
 
     @Test
-    void addsApiKeyAndClientIdHeaders() {
-        CapturingChannel channel = new CapturingChannel();
-        ClientCall<byte[], byte[]> call = new GrpcChannelFactory.AuthInterceptor("secret", "worker")
-                .interceptCall(METHOD, CallOptions.DEFAULT, channel);
+    void createsChannelThatRunsTheAuthInterceptor() {
+        AtomicInteger intercepted = new AtomicInteger();
+        ClientInterceptor auth = new ClientInterceptor() {
+            @Override
+            public <ReqT, RespT> ClientCall<ReqT, RespT> interceptCall(
+                    MethodDescriptor<ReqT, RespT> method, CallOptions callOptions, Channel next) {
+                intercepted.incrementAndGet();
+                return next.newCall(method, callOptions);
+            }
+        };
 
-        call.start(new NoopListener<>(), new Metadata());
-
-        assertEquals("secret", channel.headers.get(GrpcChannelFactory.API_KEY_HEADER));
-        assertEquals("worker", channel.headers.get(GrpcChannelFactory.CLIENT_ID_HEADER));
-    }
-
-    @Test
-    void omitsClientIdHeaderWhenNotConfigured() {
-        CapturingChannel channel = new CapturingChannel();
-        ClientCall<byte[], byte[]> call = new GrpcChannelFactory.AuthInterceptor("secret", null)
-                .interceptCall(METHOD, CallOptions.DEFAULT, channel);
-
-        call.start(new NoopListener<>(), new Metadata());
-
-        assertEquals("secret", channel.headers.get(GrpcChannelFactory.API_KEY_HEADER));
-        assertNull(channel.headers.get(GrpcChannelFactory.CLIENT_ID_HEADER));
-    }
-
-    private static final class CapturingChannel extends Channel {
-        private Metadata headers;
-
-        @Override
-        public String authority() {
-            return "test";
+        ManagedChannel channel = GrpcChannelFactory.create("localhost", 50051, auth);
+        try {
+            assertEquals("localhost:50051", channel.authority());
+            assertFalse(channel.isShutdown());
+            channel.newCall(METHOD, CallOptions.DEFAULT);
+            assertEquals(1, intercepted.get());
+        } finally {
+            channel.shutdownNow();
         }
-
-        @Override
-        public <ReqT, RespT> ClientCall<ReqT, RespT> newCall(
-                MethodDescriptor<ReqT, RespT> methodDescriptor, CallOptions callOptions) {
-            return new ClientCall<>() {
-                @Override
-                public void start(Listener<RespT> responseListener, Metadata metadata) {
-                    headers = metadata;
-                }
-
-                @Override
-                public void request(int numMessages) {
-                }
-
-                @Override
-                public void cancel(String message, Throwable cause) {
-                }
-
-                @Override
-                public void halfClose() {
-                }
-
-                @Override
-                public void sendMessage(ReqT message) {
-                }
-            };
-        }
-    }
-
-    private static final class NoopListener<T> extends ClientCall.Listener<T> {
+        assertTrue(channel.isShutdown());
     }
 }

@@ -12,6 +12,7 @@ import io.github.chirino.memory.grpc.v1.AdminPutMemoryRequest;
 import io.github.chirino.memory.grpc.v1.AdminSearchMemoriesRequest;
 import io.github.chirino.memory.grpc.v1.AdminSearchMemoriesResponse;
 import io.github.rigazilla.memory.cognition.config.CognitionConfig;
+import io.github.rigazilla.memory.cognition.auth.MemoryServiceAuth;
 import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.github.rigazilla.memory.cognition.resource.LlmRetryHelper;
@@ -68,6 +69,9 @@ public class ContradictionOnInsertService {
     MemoryServiceConfig memoryService;
 
     @Inject
+    MemoryServiceAuth memoryServiceAuth;
+
+    @Inject
     CognitionConfig cognition;
 
     @Inject
@@ -102,7 +106,7 @@ public class ContradictionOnInsertService {
                 memoryService.grpc().host(), memoryService.grpc().port());
         channel = GrpcChannelFactory.create(
                 memoryService.grpc().host(), memoryService.grpc().port(),
-                memoryService.apiKey());
+                memoryServiceAuth.channelInterceptor());
         memoriesStub = AdminMemoriesServiceGrpc.newBlockingStub(channel);
         LOG.info("ContradictionOnInsertService initialized successfully");
     }

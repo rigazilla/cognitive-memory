@@ -15,6 +15,7 @@ import io.github.rigazilla.memory.cognition.contradiction.ContradictionOnInsertP
 import io.github.rigazilla.memory.cognition.contradiction.ContradictionOnInsertService;
 import io.github.rigazilla.memory.cognition.enablement.ProcessEnablementService;
 import io.github.rigazilla.memory.cognition.extraction.MemoryCandidate;
+import io.github.rigazilla.memory.cognition.auth.MemoryServiceAuth;
 import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.github.rigazilla.memory.cognition.model.Provenance;
@@ -45,6 +46,9 @@ public class MemoryWriter {
     MemoryServiceConfig memoryService;
 
     @Inject
+    MemoryServiceAuth memoryServiceAuth;
+
+    @Inject
     ContradictionOnInsertService contradictionOnInsertService;
 
     @Inject
@@ -61,7 +65,7 @@ public class MemoryWriter {
         // Create gRPC channel with authentication interceptor
         channel = GrpcChannelFactory.create(
                 memoryService.grpc().host(), memoryService.grpc().port(),
-                memoryService.apiKey());
+                memoryServiceAuth.channelInterceptor());
         
         // Create admin stub for writing memories on behalf of users
         memoriesStub = AdminMemoriesServiceGrpc.newBlockingStub(channel);
