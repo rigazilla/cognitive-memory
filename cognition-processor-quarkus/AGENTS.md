@@ -108,7 +108,7 @@ Use **`@ConfigMapping`** (SmallRye / Quarkus typed config) instead of `@ConfigPr
 
 Two shared config mapping interfaces centralise the project's configuration:
 
-- **[`MemoryServiceConfig`](src/main/java/io/github/rigazilla/memory/cognition/config/MemoryServiceConfig.java)** — prefix `memory-service` — gRPC host/port, API key, client ID.
+- **[`MemoryServiceConfig`](src/main/java/io/github/rigazilla/memory/cognition/config/MemoryServiceConfig.java)** — prefix `memory-service` — gRPC host/port, API key, client ID, authentication (`auth.method`, `auth.oidc.*`).
 - **[`CognitionConfig`](src/main/java/io/github/rigazilla/memory/cognition/config/CognitionConfig.java)** — prefix `cognition` — runtime identity, worker ID, checkpoint, scheduler, LLM retry/backfill, secrets provider.
 
 **Usage pattern:**
@@ -117,15 +117,36 @@ Two shared config mapping interfaces centralise the project's configuration:
 @Inject
 MemoryServiceConfig memoryService;
 
+@Inject
+MemoryServiceAuth auth;
+
 channel = GrpcChannelFactory.create(
     memoryService.grpc().host(), memoryService.grpc().port(),
-    memoryService.apiKey(), memoryService.clientId());
+    auth.channelInterceptor());
 ```
 
 **Rules:**
 - **Never** add new `@ConfigProperty` fields. Extend the existing `@ConfigMapping` interfaces or add a new one for a genuinely distinct configuration domain.
 - Default values belong in the `@WithDefault` annotation on the interface method, **not** as `@ConfigProperty(defaultValue = ...)` on a field.
 - Package new config mapping interfaces under `io.github.rigazilla.memory.cognition.config`.
+
+### Authentication to memory-service
+
+Every memory-service gRPC channel must be created with `MemoryServiceAuth.channelInterceptor()`; never
+read `memoryService.apiKey()` directly. Code lives in `io.github.rigazilla.memory.cognition.auth`
+(JaCoCo gate: 80% line and branch for this package):
+
+- `AuthModeResolver` / `OidcUrlValidator`: pure validation. `memory-service.auth.method=auto|api-key|oidc`;
+  in `auto` any `memory-service.auth.oidc.*` value selects oidc and a partial configuration fails
+  startup (no fallback to the API key). `cognition.worker.id` must equal `memory-service.client-id`.
+- `MemoryServiceAuth`: early `StartupEvent` observer; in oidc mode it fetches the first token
+  (failure aborts startup) and installs `UnauthenticatedRetryInterceptor` (refresh and one replay).
+- `OidcTokenProvider` (cache, proactive renewal, back-off) over a `TokenSource`
+  (`QuarkusOidcTokenSource`, a programmatic `quarkus-oidc-client`); `BearerCallCredentials` per call.
+- oidc mode sends only `Authorization: Bearer`; api-key mode only `x-api-key` and `x-client-id`.
+- `quarkus.keycloak.devservices.enabled=false` must stay set (main and test configuration).
+- OIDC env vars are `MEMORY_SERVICE_OIDC_*`, mapped explicitly in `application.properties`.
+- Design and test plan: [`TODO/oidc-client-credentials-design-and-test-plan.md`](TODO/oidc-client-credentials-design-and-test-plan.md).
 
 ## Code Style
 

@@ -113,6 +113,17 @@
             <artifactId>jackson-datatype-jsr310</artifactId>
         </dependency>
         
+        <!-- OIDC client-credentials grant: only used to fetch tokens (see auth package) -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-oidc-client</artifactId>
+        </dependency>
+        <!-- Lets memory-service.auth.oidc.client-secret be read from a mounted secret file -->
+        <dependency>
+            <groupId>io.smallrye.config</groupId>
+            <artifactId>smallrye-config-source-file-system</artifactId>
+        </dependency>
+
         <!-- gRPC dependencies - versions managed by grpc-bom -->
         <dependency>
             <groupId>io.grpc</groupId>
@@ -314,6 +325,25 @@
                                             <counter>BRANCH</counter>
                                             <value>COVEREDRATIO</value>
                                             <minimum>0.10</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <rule>
+                                    <!-- Authentication is security-critical: hold the new package to a higher bar. -->
+                                    <element>PACKAGE</element>
+                                    <includes>
+                                        <include>io.github.rigazilla.memory.cognition.auth</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.80</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.80</minimum>
                                         </limit>
                                     </limits>
                                 </rule>

@@ -6,6 +6,7 @@ import io.github.chirino.memory.grpc.v1.EventNotification;
 import io.github.chirino.memory.grpc.v1.EventScope;
 import io.github.chirino.memory.grpc.v1.EventStreamServiceGrpc;
 import io.github.chirino.memory.grpc.v1.SubscribeEventsRequest;
+import io.github.rigazilla.memory.cognition.auth.MemoryServiceAuth;
 import io.github.rigazilla.memory.cognition.config.CognitionConfig;
 import io.github.rigazilla.memory.cognition.config.MemoryServiceConfig;
 import io.github.rigazilla.memory.cognition.enablement.EnablementContext;
@@ -14,9 +15,7 @@ import io.github.rigazilla.memory.cognition.grpc.GrpcChannelFactory;
 import io.github.rigazilla.memory.cognition.process.DurableMemoryExtractionProcess;
 import io.github.rigazilla.memory.cognition.storeall.StoreAllProcess;
 import io.github.rigazilla.memory.cognition.storeall.StoreAllService;
-import io.grpc.CallCredentials;
 import io.grpc.ManagedChannel;
-import io.grpc.Metadata;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import io.quarkus.runtime.ShutdownEvent;
@@ -31,7 +30,6 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -52,15 +50,12 @@ public class GrpcAdminEventClient {
 
     private static final Logger LOG = Logger.getLogger(GrpcAdminEventClient.class);
     private static final String EVENT_DETAIL_FULL = "full";
-    private static final Metadata.Key<String> API_KEY_HEADER =
-            Metadata.Key.of("x-api-key", Metadata.ASCII_STRING_MARSHALLER);
-    private static final Metadata.Key<String> AUTHORIZATION_HEADER =
-            Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER);
-    private static final Metadata.Key<String> CLIENT_ID_HEADER =
-            Metadata.Key.of("x-client-id", Metadata.ASCII_STRING_MARSHALLER);
 
     @Inject
     MemoryServiceConfig memoryService;
+
+    @Inject
+    MemoryServiceAuth memoryServiceAuth;
 
     @Inject
     CognitionConfig cognition;
@@ -148,7 +143,7 @@ public class GrpcAdminEventClient {
             // 2. Create gRPC channel
             channel = GrpcChannelFactory.create(
                     memoryService.grpc().host(), memoryService.grpc().port(),
-                    memoryService.apiKey(), memoryService.clientId());
+                    memoryServiceAuth.channelInterceptor());
 
             // 3. Subscribe to admin event stream
             subscribeToEvents(afterCursor);
@@ -164,31 +159,9 @@ public class GrpcAdminEventClient {
     }
 
     private void subscribeToEvents(String afterCursor) {
-        // Create CallCredentials with X-API-Key, Authorization, and X-Client-ID headers
-        // Memory Service requires:
-        // - X-API-Key or Authorization: Bearer token for authentication
-        // - X-Client-ID: to match against MEMORY_SERVICE_ROLES_ADMIN_CLIENTS for admin role
-        CallCredentials credentials = new CallCredentials() {
-            @Override
-            public void applyRequestMetadata(RequestInfo requestInfo, Executor appExecutor, MetadataApplier applier) {
-                Metadata metadata = new Metadata();
-                    // X-API-Key header for API key authentication
-                    metadata.put(API_KEY_HEADER, memoryService.apiKey());
-                    // X-Client-ID header for role mapping to admin
-                    metadata.put(CLIENT_ID_HEADER, memoryService.clientId());
-                applier.apply(metadata);
-            }
+        // Authentication (API key or OIDC bearer token) is applied by the channel interceptor.
+        EventStreamServiceGrpc.EventStreamServiceStub stub = EventStreamServiceGrpc.newStub(channel);
 
-            @Override
-            public void thisUsesUnstableApi() {
-                // Required by CallCredentials interface
-            }
-        };
-
-        // Create stub with authentication
-        EventStreamServiceGrpc.EventStreamServiceStub stub = EventStreamServiceGrpc.newStub(channel)
-                .withCallCredentials(credentials);
-        
         SubscribeEventsRequest.Builder requestBuilder = SubscribeEventsRequest.newBuilder()
                 .setScope(EventScope.EVENT_SCOPE_ADMIN)
                 .setDetail(EVENT_DETAIL_FULL);

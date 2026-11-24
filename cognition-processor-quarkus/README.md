@@ -57,6 +57,50 @@ Environment variable examples:
 - `env.example` for local host-based runs
 - `env.example` for both local and Docker-based runs
 
+### Authentication to memory-service
+
+The processor authenticates its gRPC calls with either a fixed API key (default, quickstart) or an
+OIDC client-credentials token (for example from Keycloak) that is renewed automatically.
+`memory-service.client-id` (default `cognition_processor`) is the client ID in both modes and must
+equal `cognition.worker.id`; startup fails otherwise.
+
+| Property | Environment variable | Meaning |
+|---|---|---|
+| `memory-service.auth.method` | `MEMORY_SERVICE_AUTH_METHOD` | `auto` (default), `api-key` or `oidc` |
+| `memory-service.api-key` | `MEMORY_SERVICE_API_KEY` | API key (api-key mode) |
+| `memory-service.auth.oidc.client-secret` | `MEMORY_SERVICE_OIDC_CLIENT_SECRET` | client secret (required in oidc mode) |
+| `memory-service.auth.oidc.discovery-url` | `MEMORY_SERVICE_OIDC_DISCOVERY_URL` | issuer base URL, e.g. `http://keycloak:8080/realms/memory-service`; `/.well-known/openid-configuration` is appended |
+| `memory-service.auth.oidc.token-url` | `MEMORY_SERVICE_OIDC_TOKEN_URL` | absolute token endpoint; exclusive with `discovery-url` |
+| `memory-service.auth.oidc.audience` | `MEMORY_SERVICE_OIDC_AUDIENCE` | optional `audience` request parameter |
+| `memory-service.auth.oidc.scope` | `MEMORY_SERVICE_OIDC_SCOPE` | optional, comma-separated scopes |
+| `memory-service.auth.oidc.allow-insecure` | `MEMORY_SERVICE_OIDC_ALLOW_INSECURE` | development only: allow plain `http://` to a non-loopback host |
+| `memory-service.auth.oidc.tls-configuration-name` | `MEMORY_SERVICE_OIDC_TLS_CONFIGURATION_NAME` | optional `quarkus.tls.<name>` entry (custom CA) for the token requests |
+
+Mode selection:
+- `auto`: if **any** `memory-service.auth.oidc.*` value is set, OIDC is used and fully validated
+  (secret, exactly one of `discovery-url` / `token-url`, https unless loopback or `allow-insecure`).
+  A partial OIDC configuration **fails startup**; it never falls back to the API key.
+  Otherwise the API key is used and no OIDC client is created.
+- `api-key`: always the API key; the OIDC settings are ignored (rollback path).
+- `oidc`: always OIDC; the API key is not used.
+
+Wire behaviour: in oidc mode only `Authorization: Bearer <token>` is sent. In api-key mode only
+`x-api-key` (plus `x-client-id`) is sent. The first token is fetched at startup (a failure aborts
+startup); it is then renewed shortly before it expires, with exponential back-off on failures
+(100 ms up to 30 s) while the cached token keeps being used. A call rejected with `UNAUTHENTICATED`
+invalidates the token and is replayed once with a fresh one.
+
+Notes:
+- The gRPC channel to memory-service is **plaintext** (`usePlaintext()`), so in oidc mode the bearer
+  token travels unencrypted unless the network is trusted (TLS: issue #71).
+- memory-service must accept the token's client: with its OIDC mode enabled, list the client in
+  `MEMORY_SERVICE_OIDC_ALLOWED_CLIENTS` (and grant the admin role as for the API-key client).
+- Secret from a mounted file (for example a Kubernetes secret): put a file named
+  `memory-service.auth.oidc.client-secret` in a directory and set
+  `SMALLRYE_CONFIG_SOURCE_FILE_LOCATIONS=/path/to/dir`.
+- Environment variables use the `MEMORY_SERVICE_OIDC_*` names above (not
+  `MEMORY_SERVICE_AUTH_OIDC_*`); `application.properties` maps them explicitly.
+
 ### Salience filtering
 
 Low-salience events (greetings, filler words, etc.) are scored and dropped before the extraction
