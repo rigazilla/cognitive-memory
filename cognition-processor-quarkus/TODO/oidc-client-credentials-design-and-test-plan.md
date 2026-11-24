@@ -143,17 +143,20 @@ Design:
 
 - The first token is fetched at startup as described above, and a failed first fetch is fatal.
   Later fetch failures are never fatal (back-off below).
-- One background renewal task (own daemon `ScheduledExecutorService`; the clock and scheduler
-  are injectable). Renewal is scheduled at `expiresAt - min(30s, 10% of the remaining
+- Background work runs on `ExecutorScheduler`: two daemon threads (one for renewal and fetches,
+  one for wait time-outs) behind the `Scheduler` interface; the clock and scheduler are
+  injectable. Renewal is scheduled at `expiresAt - min(30s, 10% of the remaining
   lifetime)`.
 - While a renewal is in flight the still-valid cached token keeps being served.
 - Renewal failure: retry with back-off 100 ms doubling to 30 s, forever, until shutdown; the
   cached token keeps being served until it expires. Back-off resets after a success.
 - Only an expired (or invalidated) token makes callers wait for the next token. Waiting is
-  bounded; on timeout the call fails with `UNAVAILABLE`.
+  bounded by `WAIT_TIMEOUT` (10 s); on timeout the call fails with `UNAVAILABLE`.
 - `invalidate(rejectedToken)` is a no-op unless `rejectedToken` is the currently cached one
   (concurrent callers rejected with an old token must not discard a fresh token); otherwise it
-  triggers one immediate renewal (single-flight).
+  triggers one immediate renewal (single-flight). Such refetches are spaced at least 1 s after
+  the last successful fetch (`MIN_INVALIDATE_REFETCH_INTERVAL`), so a server that keeps
+  rejecting fresh tokens cannot hammer the token endpoint.
 - Errors are sanitised: no secret, no response body, in messages or logs. Redirects are not
   followed.
 - Shutdown: `close()` in `@PreDestroy` stops renewal and cancels the in-flight fetch, but the
@@ -219,7 +222,8 @@ explicitly from `memory-service.auth.oidc.*`. Verified by the spike on Quarkus 3
 
 - **Token URL**: an absolute `tokenPath` with `discoveryEnabled(false)` works, with or without
   `authServerUrl`.
-- **Discovery** works, and the issuer in the discovery document is not validated against
+- **Discovery** works and is lazy: `newClient` does not contact the provider, so an unreachable
+  discovery URL shows up on the first `fetch()` (which is fatal at startup anyway). The issuer in the discovery document is not validated against
   `authServerUrl` (checked against a fake server).
 - **Client authentication** is Basic (`client_secret_basic`) by default; `scope` and `audience`
   are sent as form parameters.
@@ -228,6 +232,8 @@ explicitly from `memory-service.auth.oidc.*`. Verified by the spike on Quarkus 3
 - **Redirects**: set `followRedirects(false)` explicitly. A 302 from the token endpoint is not
   followed anyway and surfaces as a raw `NullPointerException`, so `QuarkusOidcTokenSource`
   wraps every `Throwable`, not only `OidcClientException`.
+- **Timeouts**: the client's own timeout is Mutiny's `io.smallrye.mutiny.TimeoutException`, not
+  `java.util.concurrent.TimeoutException`; both are categorised as "timed out".
 - **Error content**: a 400 yields an `OidcClientException` whose message is the whole response
   body, and a malformed 200 yields a `DecodeException` with body content. `TokenFetchException`
   carries only an HTTP status or an error category. The client secret and the body did not appear
@@ -314,8 +320,10 @@ Unit tests are plain JUnit (no Quarkus boot) unless stated; new code goes under
      is still served until it expires, then calls fail fast;
    - concurrency: many threads, one fetch;
    - sanitised errors (no secret in message or log).
-4. **`QuarkusOidcTokenSource` / token endpoint tests** against a JDK `HttpServer` (no new test
-   dependency; equivalent of Go `httptest`): form body (`grant_type=client_credentials`,
+4. **`QuarkusOidcTokenSourceTest`** (mocked `OidcClient`: expiry validation, error categories,
+   no leak of message or secret, timeout, `buildClientConfig` fields) and
+   **`QuarkusOidcTokenSourceClientTest`** (`@QuarkusTest` with the real `OidcClients` bean against
+   a JDK `HttpServer`; no new test dependency; equivalent of Go `httptest`): form body (`grant_type=client_credentials`,
    client credentials, scope, audience); discovery document → `token_endpoint`; 302 not
    followed; non-2xx and malformed JSON sanitised; missing `expires_in`; token-url mode makes
    no discovery request.
@@ -338,8 +346,13 @@ Unit tests are plain JUnit (no Quarkus boot) unless stated; new code goes under
    reaches `handleError` and reconnects from the saved cursor with the refreshed token; the
    final checkpoint save in `onShutdown` still succeeds after the provider was closed (cached
    token served until expiry).
-7. **`@QuarkusTest` integration** (test profiles, JDK `HttpServer` as token endpoint, a fake
-   gRPC server on an ephemeral port capturing metadata):
+7. **Startup and wiring**. Delivered as `MemoryServiceAuthTest` (plain JUnit with mocked
+   `OidcClients`: api-key mode never touches the client, a partial or failing OIDC configuration
+   aborts startup and closes the client, idempotent initialisation, shutdown) and
+   `UnauthenticatedRetryInterceptorTest` (a real Netty gRPC server with a bearer-checking
+   interceptor, so the bearer on the wire and the refresh plus replay are covered). Booting the
+   whole application with a broken OIDC profile was not added: `@QuarkusTest` cannot assert a
+   failed boot cleanly. The original wish list:
    - `oidc` profile: app starts, mode is `oidc`, calls carry a bearer token; a server-side
      `UNAUTHENTICATED` triggers refresh + one replay;
    - `api-key` profile: app starts and **no request reaches the token server**;
@@ -357,6 +370,8 @@ Unit tests are plain JUnit (no Quarkus boot) unless stated; new code goes under
    - extract a memory through the chat UI flow from AGENTS.md and confirm it is stored.
 
 ### Coverage
+
+Measured on the new package (step 3): 96% lines, 92% branches.
 
 The >80% JaCoCo target applies to the **new code only**: add a `PACKAGE` rule with
 `includes` = `io.github.rigazilla.memory.cognition.auth` (LINE and BRANCH ≥ 0.80) to the
@@ -394,7 +409,10 @@ tests (items 1–6) provide the coverage; the `@QuarkusTest` items are not relie
 
 - Discovery with a real Keycloak (internal URL vs public issuer) and the compose run: needs
   Docker (not running on the development machine at the time of the spike).
-- Exact bounded wait for an expired token in `CallCredentials` (proposal: 10 s, constant).
+- Item 6 (`GrpcAdminEventClientTest` additions) was not written: the no-replay-after-first-event
+  rule is covered in `UnauthenticatedRetryInterceptorTest`, and the "cached token served after
+  provider close" rule in `OidcTokenProviderTest`; the checkpoint-on-shutdown path itself is
+  only exercised by the manual run.
 
-Resolved: the realm and compose changes are delivered as a PR to chirino/memory-service; the #69
+Resolved: the bounded wait for an expired token is 10 s (`WAIT_TIMEOUT`); the realm and compose changes are delivered as a PR to chirino/memory-service; the #69
 body matches this design; the gRPC TLS follow-up is issue #71.
